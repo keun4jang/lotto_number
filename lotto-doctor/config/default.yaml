@@ -1,0 +1,105 @@
+# Lotto Doctor - Default Configuration
+
+app:
+  name: "lotto-doctor"
+  version: "1.0.0"
+  model_name: "balanced-ensemble"
+  model_version: "be-v1.0.0"
+
+data:
+  db_path: "data/lotto.db"
+  api_url: "https://www.dhlottery.co.kr/common.do"
+  api_method: "getLottoNumber"
+
+collection:
+  max_retries: 3
+  retry_backoff_base: 2.0  # seconds, exponential backoff
+  request_timeout: 10      # seconds
+
+generator:
+  total_candidates: 300000
+  num_games: 10
+  strategy_counts:
+    balanced: 120000
+    recent: 60000
+    gap: 60000
+    anti_crowding: 30000
+    random_quality: 30000
+  strategy_games:
+    balanced: 4
+    recent: 2
+    gap: 2
+    anti_crowding: 1
+    random_quality: 1
+
+scoring:
+  weights:
+    balanced:
+      long_frequency: 0.20
+      recent_frequency: 0.20
+      gap_score: 0.15
+      pair_score: 0.15
+      distribution_score: 0.15
+      anti_crowding: 0.10
+      diversity: 0.05
+    recent:
+      long_frequency: 0.10
+      recent_frequency: 0.40
+      gap_score: 0.15
+      pair_score: 0.10
+      distribution_score: 0.10
+      anti_crowding: 0.10
+      diversity: 0.05
+    gap:
+      long_frequency: 0.10
+      recent_frequency: 0.10
+      gap_score: 0.40
+      pair_score: 0.10
+      distribution_score: 0.10
+      anti_crowding: 0.15
+      diversity: 0.05
+    anti_crowding:
+      long_frequency: 0.15
+      recent_frequency: 0.15
+      gap_score: 0.10
+      pair_score: 0.10
+      distribution_score: 0.15
+      anti_crowding: 0.30
+      diversity: 0.05
+    random_quality:
+      long_frequency: 0.15
+      recent_frequency: 0.15
+      gap_score: 0.15
+      pair_score: 0.15
+      distribution_score: 0.20
+      anti_crowding: 0.10
+      diversity: 0.10
+
+features:
+  recent_windows: [20, 50, 100]
+  gap_max_normalize: 50
+
+filters:
+  sum_min: 90
+  sum_max: 190
+  odd_count_allowed: [2, 3, 4]
+  low_count_allowed: [2, 3, 4]   # numbers 1-22
+  low_threshold: 22
+  max_consecutive_pairs: 2
+  max_same_ending_digit: 2
+  max_same_tens_digit: 3
+  require_high_number: true      # at least one number 32-45
+  high_threshold: 32
+  max_prev_draw_overlap: 3
+  max_game_overlap: 2            # max numbers shared between any two selected games
+
+backtester:
+  min_train_draws: 200
+  report_path: "reports/backtest_summary.md"
+
+reporter:
+  reports_dir: "reports"
+
+telegram:
+  max_message_length: 4096
+  parse_mode: "HTML"
