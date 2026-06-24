@@ -1,0 +1,21 @@
+{
+  "name": "Lotto Doctor",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "postCreateCommand": "cd /workspaces/lotto_number/lotto-doctor && pip install -e '.[dev]'",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      }
+    }
+  },
+  "forwardPorts": [],
+  "remoteEnv": {
+    "TELEGRAM_BOT_TOKEN": "${localEnv:TELEGRAM_BOT_TOKEN}",
+    "TELEGRAM_CHAT_ID": "${localEnv:TELEGRAM_CHAT_ID}"
+  }
+}

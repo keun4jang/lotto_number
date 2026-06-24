@@ -24,7 +24,7 @@ jobs:
 
       - name: Collect latest draw data
         working-directory: lotto-doctor
-        run: lotto-doctor collect
+        run: lotto-doctor collect --source github
 
       - name: Check results and send via Telegram
         working-directory: lotto-doctor

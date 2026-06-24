@@ -24,7 +24,7 @@ jobs:
 
       - name: Collect latest draw data
         working-directory: lotto-doctor
-        run: lotto-doctor collect
+        run: lotto-doctor collect --source github
 
       - name: Generate and send recommendation
         working-directory: lotto-doctor

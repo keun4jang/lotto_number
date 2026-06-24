@@ -24,7 +24,7 @@ jobs:
 
       - name: Collect latest draw data
         working-directory: lotto-doctor
-        run: lotto-doctor collect || echo "데이터 수집 실패, 기존 데이터로 진행"
+        run: lotto-doctor collect --source github || echo "데이터 수집 실패, 기존 데이터로 진행"
 
       - name: Seed sample data if DB is empty
         working-directory: lotto-doctor
