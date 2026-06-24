@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from typing import Any
 
@@ -10,6 +11,8 @@ import requests
 
 from .models import Draw
 from .validator import validate_draw_numbers
+
+_GITHUB_BASE = "https://raw.githubusercontent.com/smok95/lotto/master/results"
 
 
 class CollectionError(Exception):
@@ -140,3 +143,80 @@ def collect_all_draws(
             print(f"Warning: could not fetch draw {draw_no}: {exc}")
 
     return draws
+
+
+# ---------------------------------------------------------------------------
+# GitHub fallback collector (smok95/lotto)
+# dhlottery.co.kr 봇 차단 시 대안 데이터 소스
+# ---------------------------------------------------------------------------
+
+def detect_latest_draw_no_github() -> int:
+    """Fetch latest draw number from GitHub smok95/lotto latest.json."""
+    resp = requests.get(f"{_GITHUB_BASE}/latest.json", timeout=10)
+    resp.raise_for_status()
+    return int(resp.json()["draw_no"])
+
+
+def _fetch_draw_github_raw(draw_no: int) -> Draw:
+    """Fetch a single draw from GitHub smok95/lotto. Raises CollectionError on failure."""
+    url = f"{_GITHUB_BASE}/{draw_no}.json"
+    resp = requests.get(url, timeout=10)
+    if resp.status_code == 404:
+        raise CollectionError(f"Draw {draw_no} not found on GitHub")
+    resp.raise_for_status()
+    data = resp.json()
+
+    draw_date = date.fromisoformat(data["date"][:10])
+    numbers = sorted(int(n) for n in data["numbers"])
+    bonus = int(data["bonus_no"])
+    total_sales = int(data.get("total_sales_amount", 0))
+    divisions = data.get("divisions") or []
+    first_div = divisions[0] if divisions else {}
+    first_winners = int(first_div.get("winners", 0))
+    first_amount = int(first_div.get("prize", 0))
+
+    validate_draw_numbers(numbers, bonus)
+
+    return Draw(
+        draw_no=int(data["draw_no"]),
+        draw_date=draw_date,
+        numbers=numbers,
+        bonus=bonus,
+        total_sales=total_sales,
+        first_winners=first_winners,
+        first_amount=first_amount,
+    )
+
+
+def collect_all_draws_github(
+    start: int = 1,
+    end: int | None = None,
+    progress_callback: Any = None,
+    workers: int = 20,
+) -> list[Draw]:
+    """Collect draws from GitHub smok95/lotto using parallel requests."""
+    if end is None:
+        end = detect_latest_draw_no_github()
+
+    draw_nos = list(range(start, end + 1))
+    results: dict[int, Draw] = {}
+    errors: list[str] = []
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        future_to_no = {pool.submit(_fetch_draw_github_raw, n): n for n in draw_nos}
+        done = 0
+        for future in as_completed(future_to_no):
+            draw_no = future_to_no[future]
+            done += 1
+            try:
+                results[draw_no] = future.result()
+            except Exception as exc:
+                errors.append(f"Draw {draw_no}: {exc}")
+            if progress_callback:
+                progress_callback(done, len(draw_nos))
+
+    if errors:
+        for e in errors:
+            print(f"Warning: {e}")
+
+    return [results[n] for n in draw_nos if n in results]

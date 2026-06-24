@@ -35,9 +35,21 @@ def main() -> None:
 @main.command()
 @click.option("--start", type=int, default=None, help="Start draw number")
 @click.option("--end", type=int, default=None, help="End draw number (default: latest)")
-def collect(start: Optional[int], end: Optional[int]) -> None:
-    """Collect lotto draw data from the API."""
-    from .collector import collect_all_draws, detect_latest_draw_no
+@click.option(
+    "--source",
+    type=click.Choice(["github", "api"], case_sensitive=False),
+    default="github",
+    show_default=True,
+    help="Data source: github (smok95/lotto, 병렬, 빠름) or api (dhlottery.co.kr)",
+)
+def collect(start: Optional[int], end: Optional[int], source: str) -> None:
+    """Collect lotto draw data."""
+    from .collector import (
+        collect_all_draws,
+        collect_all_draws_github,
+        detect_latest_draw_no,
+        detect_latest_draw_no_github,
+    )
 
     cfg = load_config()
     db_path = get_db_path(cfg)
@@ -50,16 +62,25 @@ def collect(start: Optional[int], end: Optional[int]) -> None:
         start = (db_latest + 1) if db_latest else 1
 
     if end is None:
-        click.echo("Detecting latest draw number...")
-        end = detect_latest_draw_no(cfg)
+        click.echo("최신 회차 확인 중...")
+        if source == "github":
+            end = detect_latest_draw_no_github()
+        else:
+            end = detect_latest_draw_no(cfg)
 
-    click.echo(f"Collecting draws {start} to {end}...")
+    click.echo(f"[{source}] {start}회 ~ {end}회 수집 중...")
 
-    def progress(current: int, total: int) -> None:
-        click.echo(f"  [{current}/{total}]", nl=False)
-        click.echo("\r", nl=False)
+    collected = [0]
 
-    draws = collect_all_draws(cfg, start=start, end=end, progress_callback=progress)
+    def progress(done: int, total: int) -> None:
+        collected[0] = done
+        click.echo(f"  [{done}/{total}]\r", nl=False)
+
+    if source == "github":
+        draws = collect_all_draws_github(start=start, end=end, progress_callback=progress)
+    else:
+        draws = collect_all_draws(cfg, start=start, end=end, progress_callback=progress)
+
     click.echo("")
 
     with get_connection(db_path) as conn:
@@ -67,7 +88,7 @@ def collect(start: Optional[int], end: Optional[int]) -> None:
             upsert_draw(conn, draw)
         conn.commit()
 
-    click.echo(f"Saved {len(draws)} draws to {db_path}")
+    click.echo(f"저장 완료: {len(draws)}회차 → {db_path}")
 
 
 @main.command()
