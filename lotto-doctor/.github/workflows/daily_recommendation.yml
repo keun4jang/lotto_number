@@ -1,0 +1,82 @@
+name: Daily Lotto Recommendation
+
+on:
+  schedule:
+    # 매일 09:00 KST = 00:00 UTC
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  recommend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: lotto-doctor
+        run: pip install -e .
+
+      - name: Collect latest draw data
+        working-directory: lotto-doctor
+        run: lotto-doctor collect || echo "데이터 수집 실패, 기존 데이터로 진행"
+
+      - name: Seed sample data if DB is empty
+        working-directory: lotto-doctor
+        run: |
+          python - <<'EOF'
+          import sqlite3, os
+          db = "data/lotto.db"
+          if not os.path.exists(db):
+              from lotto_doctor.database import init_db, get_connection, upsert_draw
+              from lotto_doctor.models import Draw
+              from datetime import date
+              import random
+              init_db(db)
+              rng = random.Random(42)
+              with get_connection(db) as conn:
+                  for i in range(100):
+                      nums = sorted(rng.sample(range(1, 46), 6))
+                      bonus = rng.choice([x for x in range(1, 46) if x not in nums])
+                      upsert_draw(conn, Draw(draw_no=1061+i, draw_date=date(2024,1,1), numbers=nums, bonus=bonus, total_sales=90000000000, first_winners=7, first_amount=2500000000))
+                  conn.commit()
+              print("샘플 데이터 삽입 완료")
+          else:
+              cur = sqlite3.connect(db).execute("SELECT COUNT(*) FROM draws")
+              cnt = cur.fetchone()[0]
+              if cnt == 0:
+                  from lotto_doctor.database import init_db, get_connection, upsert_draw
+                  from lotto_doctor.models import Draw
+                  from datetime import date
+                  import random
+                  rng = random.Random(42)
+                  with get_connection(db) as conn:
+                      for i in range(100):
+                          nums = sorted(rng.sample(range(1, 46), 6))
+                          bonus = rng.choice([x for x in range(1, 46) if x not in nums])
+                          upsert_draw(conn, Draw(draw_no=1061+i, draw_date=date(2024,1,1), numbers=nums, bonus=bonus, total_sales=90000000000, first_winners=7, first_amount=2500000000))
+                      conn.commit()
+                  print("샘플 데이터 삽입 완료")
+              else:
+                  print(f"기존 데이터 {cnt}회차 사용")
+          EOF
+
+      - name: Generate and send recommendation
+        working-directory: lotto-doctor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: lotto-doctor recommend --send
+
+      - name: Commit reports and data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add lotto-doctor/reports/ lotto-doctor/data/
+          git diff --cached --quiet || git commit -m "chore: daily recommendation $(date -u +%Y-%m-%d)"
+          git push
