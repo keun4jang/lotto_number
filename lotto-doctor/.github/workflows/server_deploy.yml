@@ -1,0 +1,28 @@
+name: Server Deploy / Command
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "서버에서 실행할 명령어"
+        required: true
+        default: "cd /home/ubuntu && git pull && pm2 restart trading || python3 trading.py &"
+        type: choice
+        options:
+          - "sudo systemctl status trading || ps aux | grep trading.py | grep -v grep"
+          - "cd /home/ubuntu && git pull"
+          - "cd /home/ubuntu && pkill -f trading.py; nohup python3 trading.py > trading.log 2>&1 &"
+          - "tail -100 /home/ubuntu/trading.log"
+          - "cat /home/ubuntu/bot_state.json"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH로 서버 명령 실행
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: ${{ github.event.inputs.command }}
