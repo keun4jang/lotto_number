@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(pip *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(lotto-doctor *)",
+      "Bash(pytest *)",
+      "Bash(ssh *)"
+    ]
+  }
+}
