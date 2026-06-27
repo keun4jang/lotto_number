@@ -1,0 +1,64 @@
+name: Server Deploy / Command
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "서버에서 실행할 명령어"
+        required: true
+        default: "봇 상태 확인"
+        type: choice
+        options:
+          - "봇 상태 확인"
+          - "git pull"
+          - "봇 재시작"
+          - "로그 확인 (최근 100줄)"
+          - "bot_state.json 확인"
+          - "로또봇 재시작"
+          - "로또봇 상태 확인"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH로 서버 명령 실행
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            case "${{ github.event.inputs.command }}" in
+              "봇 상태 확인")
+                ps aux | grep trading.py | grep -v grep
+                ;;
+              "git pull")
+                cd /home/ubuntu && git pull
+                cd /home/ubuntu/lotto_number && git pull
+                ;;
+              "봇 재시작")
+                pkill -f trading.py || true
+                sleep 2
+                cd /home/ubuntu && nohup python3 trading.py > trading.log 2>&1 &
+                echo "트레이딩 봇 재시작 완료"
+                ;;
+              "로그 확인 (최근 100줄)")
+                tail -100 /home/ubuntu/trading.log
+                ;;
+              "bot_state.json 확인")
+                cat /home/ubuntu/bot_state.json
+                ;;
+              "로또봇 재시작")
+                pkill -f bot_listener.py || true
+                sleep 1
+                cd /home/ubuntu/lotto_number && git pull
+                nohup env PYTHONPATH=/home/ubuntu/lotto_number/lotto-doctor/src python3 /home/ubuntu/lotto_number/lotto-doctor/scripts/bot_listener.py > /home/ubuntu/lotto_listener.log 2>&1 &
+                sleep 3
+                cat /home/ubuntu/lotto_listener.log
+                echo "로또봇 재시작 완료"
+                ;;
+              "로또봇 상태 확인")
+                ps aux | grep bot_listener | grep -v grep
+                tail -20 /home/ubuntu/lotto_listener.log
+                ;;
+            esac
