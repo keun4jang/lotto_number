@@ -37,11 +37,18 @@ def compute_combination_score(
     # 5. Distribution score: how evenly distributed across 1-45
     dist_sc = _distribution_score(nums)
 
-    # 6. Anti-crowding: penalise numbers that are too clustered
-    ac_sc = _anti_crowding_score(nums)
+    # 6. Anti-crowding: 구매자 편향 회피 (EV 향상 목적)
+    ac_sc = _anti_popularity_score(nums)
 
     # 7. Diversity: entropy-like measure over tens groups
     div_sc = _diversity_score(nums)
+
+    # 8. Trend: 최근 상승 추세 번호 선호
+    trend_sc = sum(number_features[n].trend for n in nums) / 6
+    trend_sc = (trend_sc + 1.0) / 2.0  # [-1,1] → [0,1]
+
+    # 9. Stability: 꾸준히 나오는 번호
+    stability_sc = sum(number_features[n].stability for n in nums) / 6
 
     total = (
         weights.get("long_frequency", 0.0) * long_freq
@@ -51,6 +58,8 @@ def compute_combination_score(
         + weights.get("distribution_score", 0.0) * dist_sc
         + weights.get("anti_crowding", 0.0) * ac_sc
         + weights.get("diversity", 0.0) * div_sc
+        + weights.get("trend", 0.0) * trend_sc
+        + weights.get("stability", 0.0) * stability_sc
     )
 
     return CombinationScore(
@@ -72,20 +81,21 @@ def _pair_score(
     pair_freq: dict[tuple[int, int], int],
     total_draws: int,
 ) -> float:
-    """Average normalised pair frequency for all pairs in combo."""
+    """χ² 기반 pair 점수: 기댓값에 가까운 쌍일수록 높은 점수 (오버피팅 방지)."""
     if total_draws == 0:
         return 0.5
-    pairs = []
+    # 이론적 기댓값: 회차당 C(6,2)=15쌍 / C(45,2)=990쌍
+    expected = total_draws * 15 / 990
+    scores = []
     for i in range(len(nums)):
         for j in range(i + 1, len(nums)):
             key = (nums[i], nums[j])
-            freq = pair_freq.get(key, 0)
-            # Expected under uniform: total_draws * C(6,2)/C(45,2) ≈ total * 15/990
-            expected = total_draws * 15 / 990
-            pairs.append(freq / (expected + 1e-9))
-    avg = sum(pairs) / len(pairs) if pairs else 0.0
-    # Normalise: score around 1.0 is average; cap at 2.0
-    return min(avg / 2.0, 1.0)
+            observed = pair_freq.get(key, 0)
+            # χ² 기여값 (편차가 클수록 낮은 점수)
+            chi2 = (observed - expected) ** 2 / (expected + 1e-9)
+            # 정규화: chi2가 낮을수록(기댓값에 가까울수록) 높은 점수
+            scores.append(1.0 / (1.0 + chi2 / 10.0))
+    return sum(scores) / len(scores) if scores else 0.5
 
 
 def _distribution_score(nums: list[int]) -> float:
@@ -100,16 +110,17 @@ def _distribution_score(nums: list[int]) -> float:
     return max(0.0, 1.0 - std / max_std)
 
 
-def _anti_crowding_score(nums: list[int]) -> float:
-    """Penalise combinations where numbers cluster tightly."""
-    # Count numbers within 3 of each other
-    crowded_pairs = 0
-    for i in range(len(nums)):
-        for j in range(i + 1, len(nums)):
-            if nums[j] - nums[i] <= 3:
-                crowded_pairs += 1
-    max_pairs = 5  # rough normalisation
-    return max(0.0, 1.0 - crowded_pairs / max_pairs)
+def _anti_popularity_score(nums: list[int]) -> float:
+    """구매자 편향(생일 번호 등) 역수 점수 - 덜 인기 있는 조합일수록 높은 점수.
+
+    당첨 시 상금 분할을 줄이기 위해 인기 없는 번호 조합을 선호.
+    이는 로또에서 수학적으로 기댓값(EV)을 향상시킬 수 있는 유일한 방법.
+    """
+    _POPULARITY: dict[int, float] = {n: (1.5 if n <= 31 else 1.0) for n in range(1, 46)}
+    _POPULARITY.update({7: 2.0, 14: 2.0, 21: 2.0, 28: 2.0, 1: 1.8, 3: 1.7, 6: 1.7, 13: 0.7})
+    avg_popularity = sum(_POPULARITY.get(n, 1.0) for n in nums) / 6
+    # 평균 인기도 역수를 [0,1]로 정규화 (최소 인기도=0.7, 최대=2.0 기준)
+    return max(0.0, min(1.0, (2.0 - avg_popularity) / (2.0 - 0.7)))
 
 
 def _diversity_score(nums: list[int]) -> float:

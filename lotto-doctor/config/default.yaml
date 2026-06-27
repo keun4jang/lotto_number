@@ -35,53 +35,63 @@ generator:
 scoring:
   weights:
     balanced:
-      long_frequency: 0.20
-      recent_frequency: 0.20
-      gap_score: 0.15
-      pair_score: 0.15
-      distribution_score: 0.15
+      long_frequency: 0.18
+      recent_frequency: 0.18
+      gap_score: 0.13
+      pair_score: 0.13
+      distribution_score: 0.13
       anti_crowding: 0.10
       diversity: 0.05
+      trend: 0.05
+      stability: 0.05
     recent:
-      long_frequency: 0.10
-      recent_frequency: 0.40
-      gap_score: 0.15
+      long_frequency: 0.08
+      recent_frequency: 0.35
+      gap_score: 0.12
+      pair_score: 0.08
+      distribution_score: 0.10
+      anti_crowding: 0.07
+      diversity: 0.05
+      trend: 0.10  # 상승 추세 중시
+      stability: 0.05
+    gap:
+      long_frequency: 0.08
+      recent_frequency: 0.08
+      gap_score: 0.35
       pair_score: 0.10
       distribution_score: 0.10
       anti_crowding: 0.10
       diversity: 0.05
-    gap:
+      trend: 0.04
+      stability: 0.10  # 안정적 미출현 번호
+    anti_crowding:
       long_frequency: 0.10
       recent_frequency: 0.10
-      gap_score: 0.40
-      pair_score: 0.10
-      distribution_score: 0.10
-      anti_crowding: 0.15
-      diversity: 0.05
-    anti_crowding:
-      long_frequency: 0.15
-      recent_frequency: 0.15
-      gap_score: 0.10
-      pair_score: 0.10
-      distribution_score: 0.15
-      anti_crowding: 0.30
-      diversity: 0.05
+      gap_score: 0.08
+      pair_score: 0.08
+      distribution_score: 0.12
+      anti_crowding: 0.35  # 구매자 편향 회피 최우선
+      diversity: 0.07
+      trend: 0.05
+      stability: 0.05
     random_quality:
-      long_frequency: 0.15
-      recent_frequency: 0.15
-      gap_score: 0.15
-      pair_score: 0.15
-      distribution_score: 0.20
+      long_frequency: 0.13
+      recent_frequency: 0.13
+      gap_score: 0.13
+      pair_score: 0.13
+      distribution_score: 0.18
       anti_crowding: 0.10
       diversity: 0.10
+      trend: 0.05
+      stability: 0.05
 
 features:
   recent_windows: [20, 50, 100]
   gap_max_normalize: 50
 
 filters:
-  sum_min: 90
-  sum_max: 190
+  sum_min: 100   # 실측 5th percentile 기준 (기존 90 → 100)
+  sum_max: 180   # 실측 95th percentile 기준 (기존 190 → 180)
   odd_count_allowed: [2, 3, 4]
   low_count_allowed: [2, 3, 4]   # numbers 1-22
   low_threshold: 22

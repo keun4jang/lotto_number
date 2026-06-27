@@ -3,23 +3,19 @@
 from __future__ import annotations
 
 import random
-from itertools import combinations
 from typing import Any
+
+import numpy as np
 
 from .analyzer import compute_number_features, compute_pair_frequency
 from .filters import passes_all_filters
 from .models import Draw, NumberFeatures
-from .scorer import score_candidates
 
-
-_STRATEGY_BIASES: dict[str, dict[str, float]] = {
-    # For each strategy, bias weights on number selection pool
-    "balanced": {},
-    "recent": {"recent": 2.0},
-    "gap": {"gap": 2.0},
-    "anti_crowding": {"anti_crowding": 2.0},
-    "random_quality": {},
-}
+# 구매자 편향 가중치 (생일 편향 반영 - anti_crowding 전략용)
+# 1-31은 생일 선택으로 인해 더 많이 선택됨 → anti_crowding은 이를 회피
+_POPULARITY_BIAS: dict[int, float] = {n: (1.5 if n <= 31 else 1.0) for n in range(1, 46)}
+_POPULARITY_BIAS.update({7: 2.0, 14: 2.0, 21: 2.0, 28: 2.0,  # 7의 배수 인기
+                          1: 1.8, 3: 1.7, 6: 1.7, 13: 0.7})   # 1,3,6 인기 / 13 비인기
 
 
 def _build_number_pool(
@@ -28,36 +24,28 @@ def _build_number_pool(
     rng: random.Random,
     top_k: int = 30,
 ) -> list[int]:
-    """Build a weighted pool of candidate numbers for a strategy."""
+    """가중 비복원 추출로 후보 번호 풀 생성."""
     all_nums = list(range(1, 46))
 
     if strategy == "recent":
-        # Prefer numbers with high recent_20 frequency
-        weights = [number_features[n].recent_20_frequency + 0.01 for n in all_nums]
+        weights = np.array([number_features[n].recent_20_frequency + 0.01 for n in all_nums])
     elif strategy == "gap":
-        # Prefer numbers with high gap score (overdue)
-        weights = [number_features[n].gap_score + 0.01 for n in all_nums]
+        weights = np.array([number_features[n].gap_score + 0.01 for n in all_nums])
     elif strategy == "anti_crowding":
-        # Prefer numbers with lower frequency (less popular)
-        weights = [1.0 - number_features[n].long_frequency + 0.01 for n in all_nums]
+        # 실제 anti-crowding: 구매자 편향(생일 번호 등) 역수로 덜 인기있는 번호 선호
+        weights = np.array([1.0 / _POPULARITY_BIAS.get(n, 1.0) for n in all_nums])
     else:
-        # balanced / random_quality: use long frequency as base
-        weights = [number_features[n].long_frequency + 0.01 for n in all_nums]
+        # balanced / random_quality
+        weights = np.array([number_features[n].long_frequency + 0.01 for n in all_nums])
 
-    # Select top_k numbers from weighted sample (without replacement)
-    selected = rng.choices(all_nums, weights=weights, k=min(top_k, 45))
-    # Deduplicate preserving order
-    seen: set[int] = set()
-    pool: list[int] = []
-    for n in selected:
-        if n not in seen:
-            seen.add(n)
-            pool.append(n)
-    # Ensure at least 6 distinct numbers
-    remaining = [n for n in all_nums if n not in seen]
-    rng.shuffle(remaining)
-    pool.extend(remaining)
-    return pool
+    # 정규화
+    weights = weights / weights.sum()
+
+    # 가중 비복원 추출 (rng 시드 기반 numpy rng)
+    np_rng = np.random.default_rng(rng.randint(0, 2**32 - 1))
+    k = min(top_k, 45)
+    selected = np_rng.choice(all_nums, size=k, replace=False, p=weights).tolist()
+    return selected
 
 
 def _generate_candidates_for_strategy(
