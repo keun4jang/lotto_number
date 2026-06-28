@@ -245,6 +245,67 @@ def check_result(send: bool, draw_no: Optional[int]) -> None:
         send_message(msg)
         click.echo("\nTelegram message sent.")
 
+    # 반성 리포트 자동 생성 및 발송
+    _run_reflection(db_path, draw, games, results, cfg, send)
+
+
+def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
+    """전략별 성과 분석 → 자동 조정 → 반성 텔레그램 발송."""
+    from .reflection import (
+        load_strategy_performance,
+        compute_weight_adjustment,
+        generate_reflection_text,
+        save_reflection_report,
+        apply_strategy_adjustment,
+    )
+    from .telegram_bot import send_message
+
+    perf = load_strategy_performance(db_path)
+
+    new_strategy_games = compute_weight_adjustment(perf, cfg)
+
+    games_dict = [
+        {
+            "game_label": g.game_label,
+            "strategy": g.strategy,
+            "matched_count": r.matched_count,
+            "rank_label": r.rank_label,
+            "has_bonus_match": r.has_bonus_match,
+        }
+        for g, r in zip(games, results)
+    ]
+
+    reflection_text = generate_reflection_text(
+        draw_no=draw.draw_no,
+        draw_numbers=draw.numbers,
+        bonus=draw.bonus,
+        games=games_dict,
+        perf=perf,
+        new_strategy_games=new_strategy_games,
+    )
+
+    save_reflection_report(
+        draw_no=draw.draw_no,
+        text=reflection_text,
+        perf=perf,
+        new_strategy_games=new_strategy_games,
+        reports_dir=cfg.get("reporter", {}).get("reports_dir", "reports"),
+    )
+
+    # 성과 기반 자동 조정 적용
+    if new_strategy_games:
+        try:
+            apply_strategy_adjustment(new_strategy_games)
+            click.echo(f"[반성] 전략 배분 자동 조정 완료: {new_strategy_games}")
+        except Exception as e:
+            click.echo(f"[반성] 조정 실패: {e}")
+    else:
+        click.echo("[반성] 데이터 부족으로 조정 보류")
+
+    if send:
+        send_message(reflection_text)
+        click.echo("반성 리포트 텔레그램 발송 완료.")
+
 
 @main.command()
 @click.option("--min-train", type=int, default=None, help="Minimum training draws")
