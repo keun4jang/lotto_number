@@ -108,15 +108,33 @@ def get_latest_recommendation_from_db() -> tuple[int, str] | None:
         ).fetchall()
 
         total_draws = conn.execute("SELECT COUNT(*) FROM draws").fetchone()[0]
+
+        # 직전 회차 날짜로 추첨일 계산 (로또는 매주 토요일)
+        prev_row = conn.execute(
+            "SELECT draw_date FROM draws WHERE draw_no=? LIMIT 1",
+            (draw_no - 1,),
+        ).fetchone()
         conn.close()
 
         if not games or len(games) < 5:
-            # 게임 수가 너무 적으면 재생성 필요
             return None
+
+        # 추첨일 계산: 직전 회차 날짜 + 7일
+        from datetime import datetime, timedelta
+        if prev_row and prev_row[0]:
+            try:
+                prev_date = datetime.strptime(str(prev_row[0]), "%Y-%m-%d")
+                draw_date = prev_date + timedelta(days=7)
+                date_str = draw_date.strftime("%Y년 %m월 %d일")
+            except Exception:
+                date_str = "날짜 미상"
+        else:
+            date_str = "날짜 미상"
 
         top10 = "  " + "  ".join(str(r[0]) for r in candidates)
         lines = [
-            f"🎱 로또 제{draw_no}회 추천번호\n",
+            f"🎱 로또 제{draw_no}회 추천번호",
+            f"📅 추첨일: {date_str} (토요일)\n",
             f"📊 후보번호 TOP 10\n{top10}\n",
             f"🎯 추천 {len(games)}게임",
         ]
