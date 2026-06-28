@@ -18,7 +18,7 @@ collection:
 
 generator:
   total_candidates: 300000
-  num_games: 10
+  num_games: 5
   strategy_counts:
     balanced: 120000
     recent: 60000
@@ -26,11 +26,11 @@ generator:
     anti_crowding: 30000
     random_quality: 30000
   strategy_games:
-    balanced: 4
-    recent: 2
-    gap: 2
+    balanced: 2
+    recent: 1
+    gap: 1
     anti_crowding: 1
-    random_quality: 1
+    random_quality: 0
 
 scoring:
   weights:
