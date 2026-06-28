@@ -116,7 +116,7 @@ def get_latest_recommendation_from_db() -> tuple[int, str] | None:
         ).fetchone()
         conn.close()
 
-        if not games or len(games) < 5:
+        if not games or len(games) < 10:
             return None
 
         # 추첨일 계산: 직전 회차 날짜 + 7일
