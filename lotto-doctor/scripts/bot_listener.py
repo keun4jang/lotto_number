@@ -1,6 +1,7 @@
 """
 텔레그램 봇 리스너
 "번호" 라고 치면 이번주 추천번호를 자동으로 답장합니다.
+"/update" 로 코드 최신화 + 재시작 가능.
 
 실행방법 (Ubuntu 서버):
   nohup env PYTHONPATH=/home/ubuntu/lotto_number/lotto-doctor/src \
@@ -17,6 +18,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -24,12 +26,14 @@ import requests
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).parent.parent
+REPO_ROOT = ROOT.parent  # lotto_number/
 sys.path.insert(0, str(ROOT / "src"))
 load_dotenv(ROOT / ".env")
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 DB_PATH = ROOT / "data" / "lotto.db"
+BRANCH = "claude/intelligent-dijkstra-c4lpeh"
 
 KEYWORDS = ["번호", "추천", "로또", "lotto", "번호줘", "번호알려줘"]
 
@@ -68,6 +72,65 @@ def send_text(chat_id: int | str, text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 자동 업데이트
+# ---------------------------------------------------------------------------
+
+def _git(*args: str) -> str:
+    result = subprocess.run(
+        ["git"] + list(args),
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return result.stdout.strip()
+
+
+def get_local_commit() -> str:
+    return _git("rev-parse", "HEAD")
+
+
+def get_remote_commit() -> str:
+    _git("fetch", "origin", BRANCH)
+    return _git("rev-parse", f"origin/{BRANCH}")
+
+
+def do_update() -> bool:
+    """최신 코드로 pull. 변경 있으면 True 반환."""
+    local = get_local_commit()
+    try:
+        remote = get_remote_commit()
+    except Exception as e:
+        print(f"[UPDATE] 원격 확인 실패: {e}")
+        return False
+
+    if local == remote:
+        print(f"[UPDATE] 이미 최신 ({local[:7]})")
+        return False
+
+    print(f"[UPDATE] 새 버전 감지 {local[:7]} → {remote[:7]}, pull 중...")
+    _git("checkout", BRANCH)
+    _git("pull", "origin", BRANCH)
+    print("[UPDATE] pull 완료, 재시작 중...")
+    return True
+
+
+def restart_self() -> None:
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+def auto_update_loop() -> None:
+    """매 시간 자동 업데이트 체크."""
+    while True:
+        time.sleep(3600)
+        try:
+            if do_update():
+                restart_self()
+        except Exception as e:
+            print(f"[UPDATE] 오류: {e}")
+
+
+# ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
 
@@ -86,7 +149,6 @@ def get_latest_recommendation_from_db() -> tuple[int, str] | None:
     try:
         conn = sqlite3.connect(str(DB_PATH))
 
-        # 가장 최근 추천 run
         row = conn.execute(
             "SELECT id, draw_no FROM recommendation_runs ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
@@ -109,7 +171,6 @@ def get_latest_recommendation_from_db() -> tuple[int, str] | None:
 
         total_draws = conn.execute("SELECT COUNT(*) FROM draws").fetchone()[0]
 
-        # 직전 회차 날짜로 추첨일 계산 (로또는 매주 토요일)
         prev_row = conn.execute(
             "SELECT draw_date FROM draws WHERE draw_no=? LIMIT 1",
             (draw_no - 1,),
@@ -119,7 +180,6 @@ def get_latest_recommendation_from_db() -> tuple[int, str] | None:
         if not games or len(games) < 5:
             return None
 
-        # 추첨일 계산: 직전 회차 날짜 + 7일
         from datetime import datetime, timedelta
         if prev_row and prev_row[0]:
             try:
@@ -162,7 +222,6 @@ def get_latest_recommendation_from_db() -> tuple[int, str] | None:
 # ---------------------------------------------------------------------------
 
 def generate_fresh_recommendation() -> str:
-    """lotto-doctor recommend 실행해서 최신 추천 생성."""
     try:
         result = subprocess.run(
             ["lotto-doctor", "recommend"],
@@ -183,15 +242,12 @@ def generate_fresh_recommendation() -> str:
 
 
 def get_recommendation() -> str:
-    """캐시 우선 → DB → 새 생성 순서로 추천번호 반환. 메시지는 단 1개."""
     latest_draw = get_latest_draw_no()
 
-    # 1) 메모리 캐시 확인
     if latest_draw and latest_draw in _cache:
         print(f"[INFO] 메모리 캐시 사용 (draw_no={latest_draw})")
         return _cache[latest_draw]
 
-    # 2) DB 캐시 확인 (가장 최근 추천, 10게임 이상만 유효)
     db_result = get_latest_recommendation_from_db()
     if db_result:
         db_draw_no, db_msg = db_result
@@ -200,11 +256,9 @@ def get_recommendation() -> str:
             _cache[latest_draw] = db_msg
         return db_msg
 
-    # 3) 새로 생성
     print("[INFO] 새 추천 생성 중...")
-    msg = generate_fresh_recommendation()
+    generate_fresh_recommendation()
 
-    # 생성 후 DB 캐시 재조회 (lotto-doctor recommend가 DB에 저장함)
     db_result = get_latest_recommendation_from_db()
     if db_result:
         _, formatted_msg = db_result
@@ -212,9 +266,7 @@ def get_recommendation() -> str:
             _cache[latest_draw] = formatted_msg
         return formatted_msg
 
-    if latest_draw and "오류" not in msg and "실패" not in msg:
-        _cache[latest_draw] = msg
-    return msg
+    return "추천번호 생성에 실패했습니다. 잠시 후 다시 시도해주세요."
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +278,14 @@ def main() -> None:
         print("[ERROR] TELEGRAM_BOT_TOKEN 없음")
         sys.exit(1)
 
-    print("[INFO] 텔레그램 봇 리스너 시작")
+    print(f"[INFO] 텔레그램 봇 리스너 시작 (commit: {get_local_commit()[:7]})")
     print(f"[INFO] 키워드: {KEYWORDS}")
     print("[INFO] 봇: https://t.me/Lotttttto_bot")
+    print("[INFO] 자동 업데이트: 매 1시간마다 GitHub 체크")
+
+    # 자동 업데이트 백그라운드 스레드
+    t = threading.Thread(target=auto_update_loop, daemon=True)
+    t.start()
 
     # 시작 시 DB 캐시 미리 로드
     db_result = get_latest_recommendation_from_db()
@@ -257,6 +314,19 @@ def main() -> None:
             user = msg.get("from", {}).get("first_name", "")
             print(f"[MSG] {user}({chat_id}): {text}")
 
+            # /update 명령어: 즉시 업데이트 + 재시작
+            if text == "/update":
+                send_text(chat_id, "🔄 최신 코드 확인 중...")
+                try:
+                    if do_update():
+                        send_text(chat_id, "✅ 업데이트 완료! 봇 재시작 중...")
+                        restart_self()
+                    else:
+                        send_text(chat_id, "✅ 이미 최신 버전입니다.")
+                except Exception as e:
+                    send_text(chat_id, f"❌ 업데이트 실패: {e}")
+                continue
+
             if not any(kw in text for kw in KEYWORDS):
                 continue
 
@@ -268,12 +338,10 @@ def main() -> None:
             try:
                 latest_draw = get_latest_draw_no()
 
-                # 캐시에 있으면 바로 발송 (잠깐만요 없이)
                 if latest_draw and latest_draw in _cache:
                     send_text(chat_id, _cache[latest_draw])
                     print("[INFO] 캐시 즉시 발송 완료")
                 else:
-                    # 새로 생성이 필요한 경우만 "잠깐만요" 발송
                     send_text(chat_id, "🎱 잠깐만요! 추천번호 가져오는 중...")
                     recommendation = get_recommendation()
                     send_text(chat_id, recommendation)
