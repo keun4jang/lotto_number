@@ -34,7 +34,7 @@ jobs:
                 ;;
               "git pull")
                 cd /home/ubuntu && git pull
-                cd /home/ubuntu/lotto_number && git pull
+                cd /home/ubuntu/lotto_number && git fetch origin && git checkout claude/intelligent-dijkstra-c4lpeh && git pull origin claude/intelligent-dijkstra-c4lpeh
                 ;;
               "봇 재시작")
                 pkill -f trading.py || true
@@ -51,7 +51,10 @@ jobs:
               "로또봇 재시작")
                 pkill -f bot_listener.py || true
                 sleep 1
-                cd /home/ubuntu/lotto_number && git pull
+                cd /home/ubuntu/lotto_number
+                git fetch origin
+                git checkout claude/intelligent-dijkstra-c4lpeh
+                git pull origin claude/intelligent-dijkstra-c4lpeh
                 nohup env PYTHONPATH=/home/ubuntu/lotto_number/lotto-doctor/src python3 /home/ubuntu/lotto_number/lotto-doctor/scripts/bot_listener.py > /home/ubuntu/lotto_listener.log 2>&1 &
                 sleep 3
                 cat /home/ubuntu/lotto_listener.log
