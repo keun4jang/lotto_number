@@ -60,17 +60,20 @@ def build_recommendation_message(
     candidate_numbers: list[tuple[int, float]],
     games: list[Any],  # list[RecommendationGame]
     summary: dict[str, Any],
+    draw_date: str = "",
 ) -> str:
     """Build the Telegram recommendation message."""
     lines: list[str] = [
         f"🎱 <b>로또 제{target_draw_no}회 추천번호</b>",
-        "",
-        "📊 <b>후보번호 TOP 10</b>",
     ]
+    if draw_date:
+        lines.append(f"📅 추첨일: {draw_date} (토요일)")
+    lines.append("")
+    lines.append("📊 <b>후보번호 TOP 10</b>")
     top10_str = "  ".join(f"<b>{n}</b>" for n, _ in candidate_numbers[:10])
     lines.append(f"  {top10_str}")
     lines.append("")
-    lines.append("🎯 <b>추천 10게임</b>")
+    lines.append(f"🎯 <b>추천 {len(games)}게임</b>")
 
     for game in games:
         nums_str = " - ".join(f"{n:02d}" for n in game.numbers)

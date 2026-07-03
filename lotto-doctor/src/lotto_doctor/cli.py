@@ -180,13 +180,25 @@ def recommend(send: bool, draw_no: Optional[int]) -> None:
     save_recommendation_markdown(games, top_nums, draw_no, cfg)
 
     click.echo(f"\n후보번호 TOP 10: {', '.join(str(c.number) for c in candidate_numbers)}")
-    click.echo("\n추천 10게임:")
+    click.echo(f"\n추천 {len(games)}게임:")
     for g in games:
         nums_str = " - ".join(f"{n:02d}" for n in g.numbers)
         click.echo(f"  {g.game_label}: [{g.strategy}] {nums_str}")
 
     if send:
-        msg = build_recommendation_message(draw_no, top_nums, games, summary)
+        from datetime import datetime, timedelta
+        draw_date = ""
+        with get_connection(db_path) as conn:
+            prev = conn.execute(
+                "SELECT draw_date FROM draws WHERE draw_no=? LIMIT 1", (draw_no - 1,)
+            ).fetchone()
+        if prev and prev[0]:
+            try:
+                d = datetime.strptime(str(prev[0]), "%Y-%m-%d") + timedelta(days=7)
+                draw_date = d.strftime("%Y년 %m월 %d일")
+            except Exception:
+                pass
+        msg = build_recommendation_message(draw_no, top_nums, games, summary, draw_date)
         send_message(msg)
         click.echo("\nTelegram message sent.")
 
