@@ -54,6 +54,10 @@ class RecommendationRun:
     seed: int
     created_at: datetime = field(default_factory=datetime.now)
     id: Optional[int] = None
+    config_hash: Optional[str] = None
+    game_count: Optional[int] = None
+    strategy_summary: Optional[str] = None
+    code_commit: Optional[str] = None
 
 
 @dataclass

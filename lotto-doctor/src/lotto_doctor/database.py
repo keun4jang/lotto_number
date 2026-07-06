@@ -93,17 +93,45 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
     """Open a SQLite connection with row factory."""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Idempotent schema migrations — safe to run multiple times."""
+    existing = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(recommendation_runs)").fetchall()
+    }
+    migrations = [
+        ("config_hash",      "ALTER TABLE recommendation_runs ADD COLUMN config_hash TEXT"),
+        ("game_count",       "ALTER TABLE recommendation_runs ADD COLUMN game_count INTEGER"),
+        ("strategy_summary", "ALTER TABLE recommendation_runs ADD COLUMN strategy_summary TEXT"),
+        ("code_commit",      "ALTER TABLE recommendation_runs ADD COLUMN code_commit TEXT"),
+    ]
+    for col, sql in migrations:
+        if col not in existing:
+            conn.execute(sql)
+
+    # Indexes (idempotent via IF NOT EXISTS)
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_runs_draw_no
+            ON recommendation_runs(draw_no);
+        CREATE INDEX IF NOT EXISTS idx_runs_config_hash
+            ON recommendation_runs(config_hash);
+    """)
+    conn.commit()
+
+
 def init_db(db_path: Path) -> None:
-    """Create tables if they do not exist."""
+    """Create tables if they do not exist, then apply migrations."""
     with get_connection(db_path) as conn:
         conn.executescript(_SCHEMA_SQL)
+        _migrate(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -177,8 +205,10 @@ def insert_recommendation_run(
     """Insert a recommendation run and return its ID."""
     cur = conn.execute(
         """
-        INSERT INTO recommendation_runs (draw_no, model_name, model_version, seed, created_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO recommendation_runs
+          (draw_no, model_name, model_version, seed, created_at,
+           config_hash, game_count, strategy_summary, code_commit)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run.draw_no,
@@ -186,9 +216,38 @@ def insert_recommendation_run(
             run.model_version,
             run.seed,
             run.created_at.isoformat(),
+            run.config_hash,
+            run.game_count,
+            run.strategy_summary,
+            run.code_commit,
         ),
     )
     return cur.lastrowid  # type: ignore[return-value]
+
+
+def get_valid_recommendation(
+    conn: sqlite3.Connection,
+    draw_no: int,
+    model_version: str,
+    config_hash: str,
+    expected_game_count: int,
+) -> Optional[dict[str, Any]]:
+    """캐시 강화 조회: model_version/config_hash/game_count 모두 일치하는 run만 반환."""
+    row = conn.execute(
+        """
+        SELECT r.id, r.draw_no, r.model_version, r.game_count
+        FROM recommendation_runs r
+        WHERE r.draw_no = ?
+          AND r.model_version = ?
+          AND r.config_hash = ?
+          AND r.game_count = ?
+          AND (SELECT COUNT(*) FROM recommendation_games g WHERE g.run_id = r.id) = ?
+        ORDER BY r.id DESC
+        LIMIT 1
+        """,
+        (draw_no, model_version, config_hash, expected_game_count, expected_game_count),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def get_recommendation_runs_for_draw(

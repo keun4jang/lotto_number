@@ -7,13 +7,14 @@ from typing import Optional
 
 import click
 
-from .config import get_db_path, load_config
+from .config import compute_config_hash, get_db_path, load_config
 from .database import (
     get_all_draws,
     get_all_evaluation_results,
     get_games_for_run,
     get_latest_draw_no,
     get_latest_recommendation_run,
+    get_valid_recommendation,
     get_candidate_numbers,
     init_db,
     insert_backtest_run,
@@ -25,6 +26,16 @@ from .database import (
     upsert_draw,
 )
 from .models import RecommendationRun
+
+
+def _get_code_commit() -> Optional[str]:
+    import subprocess
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
+        ).stdout.strip() or None
+    except Exception:
+        return None
 
 
 @click.group()
@@ -121,7 +132,8 @@ def analyze() -> None:
 @main.command()
 @click.option("--send", is_flag=True, default=False, help="Send via Telegram")
 @click.option("--draw-no", type=int, default=None, help="Target draw number (default: latest+1)")
-def recommend(send: bool, draw_no: Optional[int]) -> None:
+@click.option("--force", is_flag=True, default=False, help="캐시 무시하고 새 추천 생성")
+def recommend(send: bool, draw_no: Optional[int], force: bool) -> None:
     """Generate recommendations and optionally send via Telegram."""
     from .portfolio import build_portfolio
     from .reporter import save_recommendation_csv, save_recommendation_markdown
@@ -146,27 +158,50 @@ def recommend(send: bool, draw_no: Optional[int]) -> None:
     seed = draw_no
     model_name = cfg["app"]["model_name"]
     model_version = cfg["app"]["model_version"]
+    cfg_hash = compute_config_hash(cfg)
+    num_games = cfg["generator"]["num_games"]
+    strategy_games: dict[str, int] = cfg["generator"]["strategy_games"]
+    strategy_summary = ",".join(f"{s}:{n}" for s, n in strategy_games.items() if n > 0)
+    code_commit = _get_code_commit()
 
-    click.echo(f"Generating recommendations for draw #{draw_no} (seed={seed})...")
+    # 캐시 확인 (--force 시 건너뜀)
+    cached_run_id = None
+    if not force:
+        with get_connection(db_path) as conn:
+            cached = get_valid_recommendation(conn, draw_no, model_version, cfg_hash, num_games)
+        if cached:
+            cached_run_id = cached["id"]
+            click.echo(f"[캐시] 기존 추천 재사용 (draw_no={draw_no}, model={model_version})")
 
-    run = RecommendationRun(
-        draw_no=draw_no,
-        model_name=model_name,
-        model_version=model_version,
-        seed=seed,
-    )
+    if cached_run_id:
+        with get_connection(db_path) as conn:
+            games = get_games_for_run(conn, cached_run_id)
+            candidate_numbers = get_candidate_numbers(conn, cached_run_id)
+    else:
+        click.echo(f"Generating recommendations for draw #{draw_no} (seed={seed}, model={model_version})...")
 
-    with get_connection(db_path) as conn:
-        run_id = insert_recommendation_run(conn, run)
-        conn.commit()
+        run = RecommendationRun(
+            draw_no=draw_no,
+            model_name=model_name,
+            model_version=model_version,
+            seed=seed,
+            config_hash=cfg_hash,
+            game_count=num_games,
+            strategy_summary=strategy_summary,
+            code_commit=code_commit,
+        )
 
-    games, candidate_numbers = build_portfolio(draws, cfg, seed, run_id)
+        with get_connection(db_path) as conn:
+            run_id = insert_recommendation_run(conn, run)
+            conn.commit()
 
-    with get_connection(db_path) as conn:
-        for game in games:
-            insert_recommendation_game(conn, game)
-        insert_candidate_numbers(conn, candidate_numbers)
-        conn.commit()
+        games, candidate_numbers = build_portfolio(draws, cfg, seed, run_id)
+
+        with get_connection(db_path) as conn:
+            for game in games:
+                insert_recommendation_game(conn, game)
+            insert_candidate_numbers(conn, candidate_numbers)
+            conn.commit()
 
     stats = get_summary_stats(draws)
     summary = {

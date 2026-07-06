@@ -95,8 +95,21 @@ def get_remote_commit() -> str:
     return _git("rev-parse", f"origin/{BRANCH}")
 
 
+def _is_tree_dirty() -> bool:
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=30
+    )
+    lines = [l for l in result.stdout.splitlines()
+             if not l.strip().startswith("??")  # untracked 제외
+             and "lotto.db" not in l
+             and "/reports/" not in l
+             and ".log" not in l]
+    return bool(lines)
+
+
 def do_update() -> bool:
-    """최신 코드로 pull. 변경 있으면 True 반환."""
+    """최신 코드로 ff-only pull. 변경 있으면 True 반환."""
     local = get_local_commit()
     try:
         remote = get_remote_commit()
@@ -108,9 +121,19 @@ def do_update() -> bool:
         print(f"[UPDATE] 이미 최신 ({local[:7]})")
         return False
 
+    if _is_tree_dirty():
+        print(f"[UPDATE] working tree dirty — pull skip (DB/reports/logs 외 변경사항 존재)")
+        return False
+
     print(f"[UPDATE] 새 버전 감지 {local[:7]} → {remote[:7]}, pull 중...")
     _git("checkout", BRANCH)
-    _git("pull", "origin", BRANCH)
+    out = subprocess.run(
+        ["git", "pull", "--ff-only", "origin", BRANCH],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=120
+    )
+    if out.returncode != 0:
+        print(f"[UPDATE] pull 실패: {out.stderr[:200]}")
+        return False
     print("[UPDATE] pull 완료, 재시작 중...")
     return True
 
@@ -145,18 +168,31 @@ def get_latest_draw_no() -> int | None:
 
 
 def get_latest_recommendation_from_db() -> tuple[int, str] | None:
-    """DB에서 가장 최근 추천 결과를 (draw_no, 메시지) 형태로 반환."""
+    """DB에서 가장 최근 유효 추천 결과를 (draw_no, 메시지) 형태로 반환.
+
+    model_version/config_hash/game_count가 NULL인 구버전 캐시는 사용하지 않는다.
+    """
     try:
         conn = sqlite3.connect(str(DB_PATH))
 
+        # model_version/config_hash/game_count가 있는 최신 run 우선, 없으면 fallback
         row = conn.execute(
-            "SELECT id, draw_no FROM recommendation_runs ORDER BY created_at DESC LIMIT 1"
+            """
+            SELECT id, draw_no, model_version, game_count
+            FROM recommendation_runs
+            ORDER BY id DESC LIMIT 1
+            """
         ).fetchone()
         if not row:
             conn.close()
             return None
 
-        run_id, draw_no = row
+        run_id, draw_no, model_version, game_count = row
+
+        # 구버전 캐시 (NULL) → 무효 처리
+        if model_version is None or game_count is None:
+            conn.close()
+            return None
 
         games = conn.execute(
             "SELECT game_label, strategy, n1,n2,n3,n4,n5,n6 "

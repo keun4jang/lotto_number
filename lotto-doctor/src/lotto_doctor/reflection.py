@@ -55,53 +55,82 @@ def load_strategy_performance(db_path: str) -> dict[str, dict]:
 def compute_weight_adjustment(
     perf: dict[str, dict],
     cfg: dict[str, Any],
-    min_games: int = 20,
-    adjust_rate: float = 0.05,
 ) -> dict[str, float] | None:
-    """전략별 평균 적중수 기반으로 strategy_games 비율 소폭 조정.
+    """Shrinkage 기반 전략 배분 조정.
 
-    데이터가 충분할 때만 조정. 변화량은 ±5% 이내로 제한.
+    - reliability = n / (n + shrinkage_k): 샘플 적을수록 기본 배분에 수렴
+    - rare_event_cap: match_4 이상 희귀 이벤트 과대반영 방지
+    - 변화량 max_adjustment 이내 제한
+    - 음수 방지, 합계 정규화
     Returns None if not enough data.
     """
-    valid = {s: p for s, p in perf.items() if p["total_games"] >= min_games}
-    if len(valid) < 3:
-        return None  # 데이터 부족
-
-    avg_scores = {s: p["avg_match"] for s, p in valid.items()}
-    total_score = sum(avg_scores.values())
-    if total_score == 0:
-        return None
+    ref_cfg = cfg.get("reflection", {})
+    min_samples: int = ref_cfg.get("min_samples", 30)
+    shrinkage_k: int = ref_cfg.get("shrinkage_k", 20)
+    max_adj: float = ref_cfg.get("max_adjustment", 0.05)
+    rare_cap: int = ref_cfg.get("rare_event_cap", 2)
 
     current_games: dict[str, int] = cfg["generator"]["strategy_games"]
-    total_current = sum(current_games.values())  # 10
+    total_current = sum(current_games.values())
+    if total_current == 0:
+        return None
 
-    new_ratios = {s: avg_scores.get(s, 1.0) / total_score for s in current_games}
+    active_strategies = [s for s, n in current_games.items() if n > 0]
+    valid = {s: perf[s] for s in active_strategies if s in perf and perf[s]["total_games"] >= min_samples}
+    if len(valid) < max(2, len(active_strategies) // 2):
+        return None  # 데이터 부족
 
-    # 현재 비율
-    current_ratios = {s: v / total_current for s, v in current_games.items()}
+    base_ratios = {s: current_games[s] / total_current for s in current_games}
 
-    # 조정: 현재 비율과 성과 비율의 중간값 (급격한 변화 방지)
+    # 성과 점수: avg_match + 희귀 이벤트 보너스 (cap 적용)
+    perf_scores: dict[str, float] = {}
+    for s in active_strategies:
+        if s not in valid:
+            perf_scores[s] = sum(base_ratios[ss] for ss in active_strategies if ss in valid) / len(valid) if valid else 1.0
+            continue
+        p = valid[s]
+        base_score = p["avg_match"]
+        rare_bonus = min(p.get("match_4", 0) * 0.1 + p.get("match_5", 0) * 0.5, rare_cap * 0.1)
+        n = p["total_games"]
+        reliability = n / (n + shrinkage_k)
+        # 기본 배분 대비 성과 편차에 reliability 적용
+        perf_scores[s] = base_score + reliability * rare_bonus
+
+    total_perf = sum(perf_scores.values())
+    if total_perf == 0:
+        return None
+
+    target_ratios = {s: perf_scores[s] / total_perf for s in current_games}
+
     adjusted = {}
     for s in current_games:
-        target = new_ratios.get(s, current_ratios[s])
-        current = current_ratios[s]
-        # 최대 adjust_rate만큼만 이동
-        delta = target - current
-        delta = max(-adjust_rate, min(adjust_rate, delta))
-        adjusted[s] = current + delta
+        base = base_ratios.get(s, 0.0)
+        target = target_ratios.get(s, base)
+        n = valid.get(s, {}).get("total_games", 0)
+        reliability = n / (n + shrinkage_k)
+        delta = reliability * (target - base)
+        delta = max(-max_adj, min(max_adj, delta))
+        adjusted[s] = max(0.0, base + delta)
 
-    # 정규화 후 게임 수로 변환 (합계 10)
+    # 정규화 후 합계 total_current 맞추기
     total_adj = sum(adjusted.values())
-    new_games = {}
+    if total_adj == 0:
+        return None
+
+    new_games: dict[str, int] = {}
     remainder = total_current
-    sorted_strategies = sorted(adjusted.items(), key=lambda x: x[1], reverse=True)
-    for i, (s, ratio) in enumerate(sorted_strategies):
-        if i == len(sorted_strategies) - 1:
-            new_games[s] = max(1, remainder)
+    sorted_s = sorted(adjusted.items(), key=lambda x: x[1], reverse=True)
+    for i, (s, ratio) in enumerate(sorted_s):
+        if i == len(sorted_s) - 1:
+            new_games[s] = max(0, remainder)
         else:
-            g = max(1, round(ratio / total_adj * total_current))
+            g = max(0, round(ratio / total_adj * total_current))
             new_games[s] = g
             remainder -= g
+
+    # 합계 검증
+    if sum(new_games.values()) != total_current:
+        return None
 
     return new_games
 

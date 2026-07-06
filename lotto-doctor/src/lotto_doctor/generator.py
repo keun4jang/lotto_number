@@ -1,4 +1,4 @@
-"""Candidate generation for Lotto Doctor (Balanced Ensemble be-v1.0.0)."""
+"""Candidate generation for Lotto Doctor (Balanced Ensemble be-v1.1.0-ev)."""
 
 from __future__ import annotations
 
@@ -32,8 +32,13 @@ def _build_number_pool(
     elif strategy == "gap":
         weights = np.array([number_features[n].gap_score + 0.01 for n in all_nums])
     elif strategy == "anti_crowding":
-        # 실제 anti-crowding: 구매자 편향(생일 번호 등) 역수로 덜 인기있는 번호 선호
+        # 구매자 편향(생일 번호 등) 역수로 덜 인기있는 번호 선호
         weights = np.array([1.0 / _POPULARITY_BIAS.get(n, 1.0) for n in all_nums])
+    elif strategy == "ev_optimized":
+        # EV 최적화: 32 이상 번호 가중치 강화 + 인기 번호 회피
+        pop_inv = np.array([1.0 / _POPULARITY_BIAS.get(n, 1.0) for n in all_nums])
+        high_boost = np.array([1.5 if n >= 32 else 1.0 for n in all_nums])
+        weights = pop_inv * high_boost
     else:
         # balanced / random_quality
         weights = np.array([number_features[n].long_frequency + 0.01 for n in all_nums])
@@ -61,12 +66,17 @@ def _generate_candidates_for_strategy(
     attempts = 0
     max_attempts = count * 20
 
+    min_high = 2 if strategy == "ev_optimized" else 0
+    high_threshold = cfg.get("filters", {}).get("high_threshold", 32)
+
     while len(candidates) < count and attempts < max_attempts:
         attempts += 1
         pool = _build_number_pool(strategy, number_features, rng, top_k=30)
         if len(pool) < 6:
             continue
         combo = tuple(sorted(rng.sample(pool, 6)))
+        if min_high and sum(1 for n in combo if n >= high_threshold) < min_high:
+            continue
         if passes_all_filters(combo, prev_draw, cfg):
             candidates.append(combo)
 

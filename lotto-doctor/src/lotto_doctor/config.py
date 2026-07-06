@@ -60,6 +60,17 @@ def get_db_path(cfg: dict[str, Any] | None = None) -> Path:
     return p
 
 
+def compute_config_hash(cfg: dict[str, Any]) -> str:
+    """추천 관련 config를 sha256 해싱. secrets/연결 정보 제외."""
+    import hashlib
+    import json
+
+    _EXCLUDE_TOP_KEYS = {"telegram", "data"}  # secret/연결 정보 제외
+    relevant = {k: v for k, v in cfg.items() if k not in _EXCLUDE_TOP_KEYS}
+    canonical = json.dumps(relevant, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def get_telegram_credentials() -> tuple[str, str]:
     """Return (bot_token, chat_id) from environment variables."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
