@@ -1,4 +1,4 @@
-name: Weekly Lotto Result Check
+name: Weekly Lotto Result Check & Self-Tune
 
 on:
   schedule:
@@ -10,8 +10,11 @@ jobs:
   check-result:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout dev branch
         uses: actions/checkout@v4
+        with:
+          ref: claude/intelligent-dijkstra-c4lpeh
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -26,17 +29,24 @@ jobs:
         working-directory: lotto-doctor
         run: lotto-doctor collect --source github
 
-      - name: Check results and send via Telegram
+      - name: Check results + run reflection & self-tune
         working-directory: lotto-doctor
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: lotto-doctor check-result --send
 
-      - name: Commit reports and data
+      - name: Commit reflection results and config adjustment
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add lotto-doctor/reports/ lotto-doctor/data/
-          git diff --cached --quiet || git commit -m "chore: weekly result check $(date -u +%Y-%m-%d)"
-          git push
+          git add lotto-doctor/reports/ lotto-doctor/data/ lotto-doctor/config/default.yaml
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: weekly self-tune $(date -u +%Y-%m-%d)
+
+          Auto-commit: reflection report + strategy weight adjustment
+          from weekly result analysis."
+            git push origin claude/intelligent-dijkstra-c4lpeh
+          fi

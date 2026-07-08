@@ -142,6 +142,7 @@ def generate_reflection_text(
     games: list[dict],
     perf: dict[str, dict],
     new_strategy_games: dict[str, float] | None,
+    old_strategy_games: dict[str, int] | None = None,
 ) -> str:
     """일요일 반성 텔레그램 메시지 생성."""
     lines = [
@@ -175,14 +176,18 @@ def generate_reflection_text(
             )
 
     # 시스템 조정 내역
+    lines.append("\n━━━━━━━━━━━━━━━━━━━━")
+    lines.append("🔧 시스템 자동 조정 (self-tune)\n")
     if new_strategy_games:
-        lines.append("\n━━━━━━━━━━━━━━━━━━━━")
-        lines.append("🔧 시스템 자동 조정\n")
         lines.append("성과 기반으로 다음 주 전략 배분 조정:")
         for s, g in new_strategy_games.items():
-            lines.append(f"  {s}: {g}게임")
+            prev = old_strategy_games.get(s, "?") if old_strategy_games else "?"
+            arrow = f" ({prev}→{g})" if old_strategy_games and prev != g else f" (유지: {g})"
+            lines.append(f"  {s}{arrow}게임")
+        lines.append("\n✅ config/default.yaml 자동 반영 완료")
     else:
-        lines.append("\n🔧 시스템 조정: 데이터 축적 중 (아직 조정 없음)")
+        lines.append("데이터 축적 중 (조정 보류)")
+        lines.append("  → 전략별 최소 30게임 이상 평가 데이터 필요")
 
     lines.append("\n━━━━━━━━━━━━━━━━━━━━")
     lines.append("⚠️ 모든 6개 번호 조합의 1등 확률은 동일합니다.")

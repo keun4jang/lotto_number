@@ -2,16 +2,19 @@ name: Weekly Lotto Recommendation
 
 on:
   schedule:
-    # Friday 09:00 KST = Thursday 00:00 UTC
-    - cron: "0 0 * * 5"
+    # Saturday 09:00 KST = Friday 00:00 UTC (추첨 전날)
+    - cron: "0 0 * * 6"
   workflow_dispatch:
 
 jobs:
   recommend:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout dev branch (with latest self-tune config)
         uses: actions/checkout@v4
+        with:
+          ref: claude/intelligent-dijkstra-c4lpeh
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -26,17 +29,21 @@ jobs:
         working-directory: lotto-doctor
         run: lotto-doctor collect --source github
 
-      - name: Generate and send recommendation
+      - name: Generate and send recommendation (force-refresh with latest config)
         working-directory: lotto-doctor
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: lotto-doctor recommend --send
+        run: lotto-doctor recommend --send --force
 
       - name: Commit reports and data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add lotto-doctor/reports/ lotto-doctor/data/
-          git diff --cached --quiet || git commit -m "chore: weekly recommendation $(date -u +%Y-%m-%d)"
-          git push
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: weekly recommendation $(date -u +%Y-%m-%d)"
+            git push origin claude/intelligent-dijkstra-c4lpeh
+          fi

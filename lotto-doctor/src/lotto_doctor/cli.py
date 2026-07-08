@@ -309,6 +309,7 @@ def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
 
     perf = load_strategy_performance(db_path)
 
+    old_strategy_games: dict[str, int] = dict(cfg["generator"]["strategy_games"])
     new_strategy_games = compute_weight_adjustment(perf, cfg)
 
     games_dict = [
@@ -329,6 +330,7 @@ def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
         games=games_dict,
         perf=perf,
         new_strategy_games=new_strategy_games,
+        old_strategy_games=old_strategy_games,
     )
 
     save_reflection_report(
