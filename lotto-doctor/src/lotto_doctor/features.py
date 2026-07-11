@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .models import CombinationScore, NumberFeatures
+from .popularity import unpopularity_score as _unpopularity_score
 
 
 def compute_combination_score(
@@ -47,8 +48,11 @@ def compute_combination_score(
     trend_sc = sum(number_features[n].trend for n in nums) / 6
     trend_sc = (trend_sc + 1.0) / 2.0  # [-1,1] → [0,1]
 
-    # 9. Stability: 꾸준히 나오는 번호
+    # 9. Stability: 꼽꿨히 나오는 번호
     stability_sc = sum(number_features[n].stability for n in nums) / 6
+
+    # 10. EV score: unpopularity_score (popularity.py 기반)
+    ev_sc = _unpopularity_score(nums)
 
     total = (
         weights.get("long_frequency", 0.0) * long_freq
@@ -60,6 +64,7 @@ def compute_combination_score(
         + weights.get("diversity", 0.0) * div_sc
         + weights.get("trend", 0.0) * trend_sc
         + weights.get("stability", 0.0) * stability_sc
+        + weights.get("ev_score", 0.0) * ev_sc
     )
 
     return CombinationScore(
@@ -91,9 +96,9 @@ def _pair_score(
         for j in range(i + 1, len(nums)):
             key = (nums[i], nums[j])
             observed = pair_freq.get(key, 0)
-            # χ² 기여값 (편차가 클수록 낮은 점수)
+            # χ² 기여값 (편차가 클수록 낙은 점수)
             chi2 = (observed - expected) ** 2 / (expected + 1e-9)
-            # 정규화: chi2가 낮을수록(기댓값에 가까울수록) 높은 점수
+            # 정규화: chi2가 낙을수록(기댓값에 가까울수록) 높은 점수
             scores.append(1.0 / (1.0 + chi2 / 10.0))
     return sum(scores) / len(scores) if scores else 0.5
 
