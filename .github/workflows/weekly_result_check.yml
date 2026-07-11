@@ -1,4 +1,4 @@
-name: Weekly Lotto Result Check
+name: Weekly Lotto Result Check & Self-Tune
 
 on:
   schedule:
@@ -10,8 +10,11 @@ jobs:
   check-result:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout main
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -24,19 +27,28 @@ jobs:
 
       - name: Collect latest draw data
         working-directory: lotto-doctor
-        run: lotto-doctor collect --source github || echo "수집 실패"
+        run: lotto-doctor collect --source github
 
-      - name: Check results and send via Telegram
+      - name: Check results + reflection + self-tune
         working-directory: lotto-doctor
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: lotto-doctor check-result --send
 
-      - name: Commit reports and data
+      - name: Commit DB, reports, and auto-tuned config
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add lotto-doctor/reports/ lotto-doctor/data/
-          git diff --cached --quiet || git commit -m "chore: weekly result check $(date -u +%Y-%m-%d)"
-          git push
+          # DB는 .gitignore에 있으나 Actions에서는 강제 추적하여 영속성 유지
+          git add -f lotto-doctor/data/lotto.db
+          git add lotto-doctor/reports/ lotto-doctor/config/default.yaml
+          if git diff --cached --quiet; then
+            echo "변경 없음, 커밋 건너뜀."
+          else
+            git commit -m "chore: weekly self-tune $(date -u +%Y-%m-%d)
+
+          [자동] 결과 분석 → 전략 배분 조정 → model_version bump"
+            git pull --rebase origin main
+            git push origin main
+          fi

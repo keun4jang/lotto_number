@@ -2,35 +2,33 @@
 
 app:
   name: "lotto-doctor"
-  version: "1.0.0"
+  version: "1.1.0"
   model_name: "balanced-ensemble"
-  model_version: "be-v1.0.0"
+  model_version: "be-v1.1.0-ev"  # EV/anti-popularity 개선 버전
 
 data:
   db_path: "data/lotto.db"
-  api_url: "https://www.dhlottery.co.kr/common.do"
-  api_method: "getLottoNumber"
 
 collection:
   max_retries: 3
-  retry_backoff_base: 2.0  # seconds, exponential backoff
-  request_timeout: 10      # seconds
+  retry_backoff_base: 2.0
+  request_timeout: 10
 
 generator:
   total_candidates: 300000
-  num_games: 10
+  num_games: 5
   strategy_counts:
-    balanced: 120000
+    balanced: 100000
     recent: 60000
     gap: 60000
-    anti_crowding: 30000
-    random_quality: 30000
+    anti_crowding: 40000
+    ev_optimized: 40000
   strategy_games:
-    balanced: 4
-    recent: 2
-    gap: 2
+    balanced: 1
+    recent: 1
+    gap: 1
     anti_crowding: 1
-    random_quality: 1
+    ev_optimized: 1
 
 scoring:
   weights:
@@ -40,75 +38,92 @@ scoring:
       gap_score: 0.13
       pair_score: 0.13
       distribution_score: 0.13
-      anti_crowding: 0.10
+      anti_crowding: 0.08
       diversity: 0.05
       trend: 0.05
       stability: 0.05
+      ev_score: 0.02
     recent:
       long_frequency: 0.08
       recent_frequency: 0.35
       gap_score: 0.12
       pair_score: 0.08
       distribution_score: 0.10
-      anti_crowding: 0.07
+      anti_crowding: 0.06
       diversity: 0.05
-      trend: 0.10  # 상승 추세 중시
-      stability: 0.05
+      trend: 0.10
+      stability: 0.04
+      ev_score: 0.02
     gap:
       long_frequency: 0.08
       recent_frequency: 0.08
       gap_score: 0.35
       pair_score: 0.10
       distribution_score: 0.10
-      anti_crowding: 0.10
+      anti_crowding: 0.08
       diversity: 0.05
       trend: 0.04
-      stability: 0.10  # 안정적 미출현 번호
+      stability: 0.10
+      ev_score: 0.02
     anti_crowding:
-      long_frequency: 0.10
-      recent_frequency: 0.10
+      long_frequency: 0.08
+      recent_frequency: 0.08
+      gap_score: 0.06
+      pair_score: 0.08
+      distribution_score: 0.10
+      anti_crowding: 0.38
+      diversity: 0.08
+      trend: 0.04
+      stability: 0.04
+      ev_score: 0.06
+    ev_optimized:
+      long_frequency: 0.06
+      recent_frequency: 0.06
       gap_score: 0.08
       pair_score: 0.08
-      distribution_score: 0.12
-      anti_crowding: 0.35  # 구매자 편향 회피 최우선
-      diversity: 0.07
-      trend: 0.05
-      stability: 0.05
-    random_quality:
-      long_frequency: 0.13
-      recent_frequency: 0.13
-      gap_score: 0.13
-      pair_score: 0.13
-      distribution_score: 0.18
-      anti_crowding: 0.10
+      distribution_score: 0.10
+      anti_crowding: 0.20
       diversity: 0.10
-      trend: 0.05
-      stability: 0.05
+      trend: 0.02
+      stability: 0.02
+      ev_score: 0.28  # EV/unpopularity 최우선
 
 features:
   recent_windows: [20, 50, 100]
   gap_max_normalize: 50
 
 filters:
-  sum_min: 100   # 실측 5th percentile 기준 (기존 90 → 100)
-  sum_max: 180   # 실측 95th percentile 기준 (기존 190 → 180)
+  sum_min: 100
+  sum_max: 180
   odd_count_allowed: [2, 3, 4]
-  low_count_allowed: [2, 3, 4]   # numbers 1-22
+  low_count_allowed: [2, 3, 4]
   low_threshold: 22
   max_consecutive_pairs: 2
   max_same_ending_digit: 2
   max_same_tens_digit: 3
-  require_high_number: true      # at least one number 32-45
+  require_high_number: true
   high_threshold: 32
   max_prev_draw_overlap: 3
-  max_game_overlap: 2            # max numbers shared between any two selected games
+  max_game_overlap: 2
+
+popularity:
+  enabled: true
+  min_high_numbers_ev: 2  # ev_optimized: 최소 32 이상 번호 2개 이상 유도
+  target_unpopularity_weight: 0.28
 
 backtester:
   min_train_draws: 200
   report_path: "reports/backtest_summary.md"
+  include_baselines: true
 
 reporter:
   reports_dir: "reports"
+
+reflection:
+  min_samples: 30
+  shrinkage_k: 20
+  max_adjustment: 0.05
+  rare_event_cap: 2
 
 telegram:
   max_message_length: 4096
