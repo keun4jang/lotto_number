@@ -143,6 +143,7 @@ def generate_reflection_text(
     perf: dict[str, dict],
     new_strategy_games: dict[str, float] | None,
     old_strategy_games: dict[str, int] | None = None,
+    new_model_version: str | None = None,
 ) -> str:
     """일요일 반성 텔레그램 메시지 생성."""
     lines = [
@@ -184,7 +185,8 @@ def generate_reflection_text(
             prev = old_strategy_games.get(s, "?") if old_strategy_games else "?"
             arrow = f" ({prev}→{g})" if old_strategy_games and prev != g else f" (유지: {g})"
             lines.append(f"  {s}{arrow}게임")
-        lines.append("\n✅ config/default.yaml 자동 반영 완료")
+        ver_note = f" (→ {new_model_version})" if new_model_version else ""
+        lines.append(f"\n✅ config/default.yaml 자동 반영 완료{ver_note}")
     else:
         lines.append("데이터 축적 중 (조정 보류)")
         lines.append("  → 전략별 최소 30게임 이상 평가 데이터 필요")
@@ -216,18 +218,43 @@ def save_reflection_report(
     return path
 
 
+def _bump_patch_version(current: str) -> str:
+    """be-v1.1.0-ev → be-v1.1.1-ev 형식으로 patch 버전 증가."""
+    import re
+    m = re.match(r"^(be-v\d+\.\d+\.)(\d+)(-.+)?$", current)
+    if not m:
+        return current
+    prefix, patch, suffix = m.group(1), int(m.group(2)), m.group(3) or ""
+    return f"{prefix}{patch + 1}{suffix}"
+
+
 def apply_strategy_adjustment(
     new_strategy_games: dict[str, int],
     config_path: str = "config/default.yaml",
-) -> None:
-    """config/default.yaml의 strategy_games 값을 업데이트."""
+) -> str:
+    """config/default.yaml의 strategy_games 값을 업데이트하고 patch 버전을 올린다.
+
+    실제 변경이 있을 때만 model_version을 bump한다.
+    Returns: new model_version string
+    """
     import re
     text = Path(config_path).read_text(encoding="utf-8")
+    original = text
 
     for strategy, games in new_strategy_games.items():
-        # strategy_games 섹션의 해당 전략 값만 교체
         pattern = rf"(strategy_games:.*?{strategy}:\s*)\d+"
         replacement = rf"\g<1>{games}"
         text = re.sub(pattern, replacement, text, flags=re.DOTALL)
 
+    # 전략 배분이 실제로 바뀐 경우에만 버전 bump
+    version_bumped = ""
+    if text != original:
+        ver_m = re.search(r'model_version:\s*"([^"]+)"', text)
+        if ver_m:
+            old_ver = ver_m.group(1)
+            new_ver = _bump_patch_version(old_ver)
+            text = text.replace(f'model_version: "{old_ver}"', f'model_version: "{new_ver}"', 1)
+            version_bumped = new_ver
+
     Path(config_path).write_text(text, encoding="utf-8")
+    return version_bumped

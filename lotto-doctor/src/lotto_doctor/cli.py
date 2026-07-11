@@ -323,6 +323,20 @@ def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
         for g, r in zip(games, results)
     ]
 
+    # 성과 기반 자동 조정 먼저 적용 → 버전 확보
+    new_ver: str | None = None
+    if new_strategy_games:
+        try:
+            new_ver = apply_strategy_adjustment(new_strategy_games) or None
+            if new_ver:
+                click.echo(f"[반성] 전략 배분 자동 조정 완료: {new_strategy_games} → model_version {new_ver}")
+            else:
+                click.echo(f"[반성] 전략 배분 변화 없음 (조정값 동일): {new_strategy_games}")
+        except Exception as e:
+            click.echo(f"[반성] 조정 실패: {e}")
+    else:
+        click.echo("[반성] 데이터 부족으로 조정 보류")
+
     reflection_text = generate_reflection_text(
         draw_no=draw.draw_no,
         draw_numbers=draw.numbers,
@@ -331,6 +345,7 @@ def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
         perf=perf,
         new_strategy_games=new_strategy_games,
         old_strategy_games=old_strategy_games,
+        new_model_version=new_ver,
     )
 
     save_reflection_report(
@@ -340,16 +355,6 @@ def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
         new_strategy_games=new_strategy_games,
         reports_dir=cfg.get("reporter", {}).get("reports_dir", "reports"),
     )
-
-    # 성과 기반 자동 조정 적용
-    if new_strategy_games:
-        try:
-            apply_strategy_adjustment(new_strategy_games)
-            click.echo(f"[반성] 전략 배분 자동 조정 완료: {new_strategy_games}")
-        except Exception as e:
-            click.echo(f"[반성] 조정 실패: {e}")
-    else:
-        click.echo("[반성] 데이터 부족으로 조정 보류")
 
     if send:
         send_message(reflection_text)
