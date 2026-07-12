@@ -128,3 +128,8 @@ reflection:
 telegram:
   max_message_length: 4096
   parse_mode: "HTML"
+
+pension:
+  jo_range: 5          # 조 범위 (1~5)
+  num_games: 3         # 추천 게임 수
+  recent_window: 50    # 최근 n회 기준 빈도 계산

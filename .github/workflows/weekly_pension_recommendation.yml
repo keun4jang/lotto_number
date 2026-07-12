@@ -1,0 +1,46 @@
+name: Weekly Pension Lottery 720+ Recommendation
+
+on:
+  schedule:
+    # Saturday 09:00 KST = Friday 00:00 UTC (추첨 전날)
+    - cron: "0 0 * * 6"
+  workflow_dispatch:
+
+jobs:
+  pension-recommend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: lotto-doctor
+        run: pip install -e .
+
+      - name: Generate and send pension recommendation
+        working-directory: lotto-doctor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: lotto-doctor pension recommend --send
+
+      - name: Commit DB and reports
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f lotto-doctor/data/lotto.db
+          if git diff --cached --quiet; then
+            echo "변경 없음, 커밋 건너뜀."
+          else
+            git commit -m "chore: pension weekly recommendation $(date -u +%Y-%m-%d)"
+            git pull --rebase origin main
+            git push origin main
+          fi
