@@ -424,3 +424,173 @@ def resend(target_draw_no: int) -> None:
     msg = build_recommendation_message(target_draw_no, top_nums, games, summary)
     send_message(msg)
     click.echo(f"Resent recommendation for draw #{target_draw_no}.")
+
+
+# ---------------------------------------------------------------------------
+# Pension Lottery 720+ commands
+# ---------------------------------------------------------------------------
+
+@main.group()
+def pension() -> None:
+    """연금복권720+ analysis and recommendation commands."""
+
+
+@pension.command("collect")
+@click.argument("csv_path")
+def pension_collect(csv_path: str) -> None:
+    """Import pension lottery draw data from CSV file.
+
+    CSV format: 회차,추첨일,조,번호
+    Download from https://dhlottery.co.kr (연금복권720+ 당첨번호 조회)
+    """
+    from .pension_collector import load_pension_csv
+    from .pension_database import init_pension_db, upsert_pension_draw
+    from .database import get_connection
+
+    cfg = load_config()
+    db_path = get_db_path(cfg)
+    init_pension_db(db_path)
+
+    draws = load_pension_csv(csv_path)
+    if not draws:
+        click.echo("CSV에서 데이터를 읽지 못했습니다. 형식을 확인하세요.")
+        return
+
+    with get_connection(db_path) as conn:
+        for draw in draws:
+            upsert_pension_draw(conn, draw)
+        conn.commit()
+
+    click.echo(f"저장 완료: {len(draws)}회차 → {db_path}")
+    click.echo(f"  최신 회차: {draws[-1].draw_no} ({draws[-1].draw_date})")
+
+
+@pension.command("recommend")
+@click.option("--send", is_flag=True, default=False, help="Send via Telegram")
+@click.option("--draw-no", type=int, default=None, help="Target draw number (default: latest+1)")
+def pension_recommend(send: bool, draw_no: Optional[int]) -> None:
+    """Generate pension lottery 720+ recommendations."""
+    from .pension_database import (
+        init_pension_db, get_all_pension_draws, get_latest_pension_draw_no,
+        insert_pension_run, insert_pension_game, get_connection as _gc,
+    )
+    from .pension_generator import generate_pension_portfolio
+    from .pension_models import PensionRecommendationRun
+    from .pension_telegram import build_pension_recommendation_message
+    from .telegram_bot import send_message
+    from .database import get_connection
+
+    cfg = load_config()
+    db_path = get_db_path(cfg)
+    init_pension_db(db_path)
+
+    with get_connection(db_path) as conn:
+        draws = get_all_pension_draws(conn)
+        db_latest = get_latest_pension_draw_no(conn)
+
+    if not draws:
+        click.echo("데이터 없음. CSV로 먼저 수집하세요: lotto-doctor pension collect <file.csv>")
+        return
+
+    if draw_no is None:
+        draw_no = (db_latest or 0) + 1
+
+    run = PensionRecommendationRun(
+        draw_no=draw_no,
+        model_version="pension-v1.0.0",
+        seed=draw_no,
+    )
+
+    with get_connection(db_path) as conn:
+        run_id = insert_pension_run(conn, run)
+        conn.commit()
+
+    games = generate_pension_portfolio(draws, cfg, seed=draw_no, run_id=run_id)
+
+    with get_connection(db_path) as conn:
+        for game in games:
+            insert_pension_game(conn, game)
+        conn.commit()
+
+    click.echo(f"\n제{draw_no}회 연금복권720+ 추천:")
+    for g in games:
+        click.echo(f"  [{g.game_label}] [{g.strategy}] {g.jo}조 - {g.number}")
+
+    if send:
+        from datetime import datetime, timedelta
+        draw_date = ""
+        with get_connection(db_path) as conn:
+            prev = conn.execute(
+                "SELECT draw_date FROM pension_draws WHERE draw_no=? LIMIT 1", (draw_no - 1,)
+            ).fetchone()
+        if prev and prev[0]:
+            try:
+                d = datetime.strptime(str(prev[0]), "%Y-%m-%d") + timedelta(days=7)
+                draw_date = d.strftime("%Y년 %m월 %d일")
+            except Exception:
+                pass
+        msg = build_pension_recommendation_message(draw_no, games, draw_date)
+        send_message(msg)
+        click.echo("Telegram message sent.")
+
+
+@pension.command("check-result")
+@click.option("--send", is_flag=True, default=False, help="Send results via Telegram")
+@click.option("--draw-no", type=int, default=None, help="Draw number to evaluate")
+def pension_check_result(send: bool, draw_no: Optional[int]) -> None:
+    """Evaluate pension lottery recommendations against actual draw result."""
+    from .pension_database import (
+        init_pension_db, get_latest_pension_run, get_pension_draw,
+        get_pension_games_for_run, insert_pension_evaluation,
+    )
+    from .pension_evaluator import evaluate_pension_run
+    from .pension_telegram import build_pension_result_message
+    from .telegram_bot import send_message
+    from .database import get_connection
+
+    cfg = load_config()
+    db_path = get_db_path(cfg)
+    init_pension_db(db_path)
+
+    with get_connection(db_path) as conn:
+        run_info = get_latest_pension_run(conn)
+        if run_info is None:
+            click.echo("추천 기록 없음. pension recommend 먼저 실행하세요.")
+            return
+
+        target_draw_no = draw_no or run_info["draw_no"]
+        draw = get_pension_draw(conn, target_draw_no)
+        if draw is None:
+            click.echo(f"제{target_draw_no}회 결과 없음. CSV로 수집 후 재시도하세요.")
+            return
+
+        games = get_pension_games_for_run(conn, run_info["id"])
+        if not games:
+            click.echo(f"추천 게임 없음 (run_id={run_info['id']}).")
+            return
+
+        results = evaluate_pension_run(games, draw)
+        for result in results:
+            insert_pension_evaluation(conn, result)
+        conn.commit()
+
+    click.echo(f"\n제{target_draw_no}회 당첨번호: {draw.jo}조 - {draw.number}")
+    click.echo("\n결과:")
+    for g, r in zip(games, results):
+        jo_note = "조✓" if r.jo_match else "조✗"
+        click.echo(f"  [{g.game_label}] {g.jo}조-{g.number} ({jo_note}, 뒤{r.matched_suffix}자리) → {r.prize_rank}")
+
+    if send:
+        msg = build_pension_result_message(draw, games, results)
+        send_message(msg)
+        click.echo("Telegram message sent.")
+
+
+@pension.command("sample-csv")
+@click.option("--out", default="data/pension_sample.csv", help="Output path")
+def pension_sample_csv(out: str) -> None:
+    """Generate a sample CSV template for pension lottery data entry."""
+    from .pension_collector import generate_sample_csv
+    generate_sample_csv(out)
+    click.echo(f"샘플 CSV 생성: {out}")
+    click.echo("이 파일에 연금복권720+ 당첨번호를 입력 후 'pension collect' 명령으로 로드하세요.")
