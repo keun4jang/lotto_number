@@ -2,8 +2,9 @@ name: Weekly Lotto Recommendation
 
 on:
   schedule:
-    # Saturday 09:00 KST = Friday 00:00 UTC (추첨 전날)
-    - cron: "0 0 * * 6"
+    # 로또 추첨일: 토요일 → 전날(금요일)에 09:00, 20:00 KST 하루 2회 발송
+    - cron: "0 0 * * 5"   # 금요일 09:00 KST
+    - cron: "0 11 * * 5"  # 금요일 20:00 KST
   workflow_dispatch:
 
 jobs:
