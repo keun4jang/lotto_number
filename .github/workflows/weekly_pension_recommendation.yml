@@ -30,6 +30,22 @@ jobs:
         working-directory: lotto-doctor
         run: lotto-doctor pension collect-auto || echo "자동 수집 실패 - 기존 데이터로 진행"
 
+      - name: Backfill pension history if data is sparse (reliability bootstrap)
+        working-directory: lotto-doctor
+        run: |
+          COUNT=$(python3 -c "
+import sqlite3
+try:
+    conn = sqlite3.connect('data/lotto.db')
+    print(conn.execute('SELECT COUNT(*) FROM pension_draws').fetchone()[0])
+except Exception:
+    print(0)
+")
+          echo "현재 연금복권 회차 수: $COUNT"
+          if [ "$COUNT" -lt 15 ]; then
+            lotto-doctor pension backfill --count 30 --delay 1.0 || echo "백필 실패 - 기존 데이터로 진행"
+          fi
+
       - name: Generate and send pension recommendation
         working-directory: lotto-doctor
         env:
