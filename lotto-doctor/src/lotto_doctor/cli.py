@@ -164,6 +164,7 @@ def recommend(send: bool, draw_no: Optional[int], force: bool) -> None:
     strategy_summary = ",".join(f"{s}:{n}" for s, n in strategy_games.items() if n > 0)
     code_commit = _get_code_commit()
 
+    # 캐시 확인 (--force 시 건너뜀)
     cached_run_id = None
     if not force:
         with get_connection(db_path) as conn:
@@ -204,7 +205,7 @@ def recommend(send: bool, draw_no: Optional[int], force: bool) -> None:
 
     stats = get_summary_stats(draws)
     summary = {
-        "점 학습 회차": stats["total_draws"],
+        "총 학습 회차": stats["total_draws"],
         "최신 회차": stats["latest_draw_no"],
         "모델": f"{model_name} {model_version}",
     }
@@ -291,6 +292,7 @@ def check_result(send: bool, draw_no: Optional[int]) -> None:
         send_message(msg)
         click.echo("\nTelegram message sent.")
 
+    # 반성 리포트 자동 생성 및 발송
     _run_reflection(db_path, draw, games, results, cfg, send)
 
 
@@ -321,6 +323,7 @@ def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
         for g, r in zip(games, results)
     ]
 
+    # 성과 기반 자동 조정 먼저 적용 → 버전 확보
     new_ver: str | None = None
     if new_strategy_games:
         try:
@@ -442,6 +445,7 @@ def pension_collect(csv_path: str) -> None:
     """
     from .pension_collector import load_pension_csv
     from .pension_database import init_pension_db, upsert_pension_draw
+    from .database import get_connection
 
     cfg = load_config()
     db_path = get_db_path(cfg)
@@ -461,6 +465,36 @@ def pension_collect(csv_path: str) -> None:
     click.echo(f"  최신 회차: {draws[-1].draw_no} ({draws[-1].draw_date})")
 
 
+@pension.command("collect-auto")
+@click.option("--min-agreement", type=int, default=2, help="교차검증에 필요한 최소 일치 기사 수")
+def pension_collect_auto(min_agreement: int) -> None:
+    """구글 뉴스 검색으로 최신 연금복권720+ 당첨번호를 자동 수집한다.
+
+    dhlottery.co.kr 직접 수집은 봇 차단으로 불가능하므로, 추첨 직후 보도되는
+    언론사 기사 제목을 교차검증하여 당첨번호를 추출한다.
+    """
+    from .pension_news_collector import fetch_latest_pension_draw_from_news
+    from .pension_database import init_pension_db, upsert_pension_draw, get_pension_draw
+
+    cfg = load_config()
+    db_path = get_db_path(cfg)
+    init_pension_db(db_path)
+
+    draw = fetch_latest_pension_draw_from_news(min_agreement=min_agreement)
+    if draw is None:
+        click.echo("뉴스 교차검증 실패: 신뢰할 수 있는 당첨번호를 찾지 못했습니다.")
+        click.echo("(회차가 아직 보도되지 않았거나 언론사 표기가 일치하지 않음)")
+        return
+
+    with get_connection(db_path) as conn:
+        existing = get_pension_draw(conn, draw.draw_no)
+        upsert_pension_draw(conn, draw)
+        conn.commit()
+
+    status = "갱신" if existing else "신규 저장"
+    click.echo(f"{status} 완료: 제{draw.draw_no}회 {draw.jo}조 {draw.number} ({draw.draw_date})")
+
+
 @pension.command("recommend")
 @click.option("--send", is_flag=True, default=False, help="Send via Telegram")
 @click.option("--draw-no", type=int, default=None, help="Target draw number (default: latest+1)")
@@ -474,6 +508,7 @@ def pension_recommend(send: bool, draw_no: Optional[int]) -> None:
     from .pension_models import PensionRecommendationRun
     from .pension_telegram import build_pension_recommendation_message
     from .telegram_bot import send_message
+    from .database import get_connection
 
     cfg = load_config()
     db_path = get_db_path(cfg)
@@ -484,7 +519,10 @@ def pension_recommend(send: bool, draw_no: Optional[int]) -> None:
         db_latest = get_latest_pension_draw_no(conn)
 
     if not draws:
-        click.echo("데이터 없음. CSV로 먼저 수집하세요: lotto-doctor pension collect <file.csv>")
+        msg = (
+            "데이터 없음. CSV로 먼저 수집하세요: lotto-doctor pension collect <file.csv>"
+        )
+        click.echo(msg)
         if send:
             send_message(
                 "⚠️ 연금복권720+ 추천 실패\n\n"
@@ -548,6 +586,7 @@ def pension_check_result(send: bool, draw_no: Optional[int]) -> None:
     from .pension_evaluator import evaluate_pension_run
     from .pension_telegram import build_pension_result_message
     from .telegram_bot import send_message
+    from .database import get_connection
 
     cfg = load_config()
     db_path = get_db_path(cfg)
