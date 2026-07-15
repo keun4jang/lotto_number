@@ -1,14 +1,13 @@
-name: Weekly Pension Lottery 720+ Recommendation
+name: Weekly Pension Lottery 720+ Result Check
 
 on:
   schedule:
-    # 연금복권720+ 추첨일: 목요일 → 전날(수요일)에 09:00, 16:00 KST 하루 2회 발송
-    - cron: "0 0 * * 3"  # 수요일 09:00 KST
-    - cron: "0 7 * * 3"  # 수요일 16:00 KST
+    # 연금복권720+ 추첨일: 목요일 → 다음날(금요일) 09:00 KST 결과 확인
+    - cron: "0 0 * * 5"  # 금요일 09:00 KST
   workflow_dispatch:
 
 jobs:
-  pension-recommend:
+  pension-check-result:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main
@@ -28,16 +27,16 @@ jobs:
 
       - name: Auto-collect latest pension draw result (news cross-check)
         working-directory: lotto-doctor
-        run: lotto-doctor pension collect-auto || echo "자동 수집 실패 - 기존 데이터로 진행"
+        run: lotto-doctor pension collect-auto
 
-      - name: Generate and send pension recommendation
+      - name: Check pension recommendation result
         working-directory: lotto-doctor
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: lotto-doctor pension recommend --send
+        run: lotto-doctor pension check-result --send
 
-      - name: Commit DB and reports
+      - name: Commit DB
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -45,7 +44,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "변경 없음, 커밋 건너뜀."
           else
-            git commit -m "chore: pension weekly recommendation $(date -u +%Y-%m-%d)"
+            git commit -m "chore: pension weekly result check $(date -u +%Y-%m-%d)"
             git pull --rebase origin main
             git push origin main
           fi

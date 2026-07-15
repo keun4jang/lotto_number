@@ -465,6 +465,36 @@ def pension_collect(csv_path: str) -> None:
     click.echo(f"  최신 회차: {draws[-1].draw_no} ({draws[-1].draw_date})")
 
 
+@pension.command("collect-auto")
+@click.option("--min-agreement", type=int, default=2, help="교차검증에 필요한 최소 일치 기사 수")
+def pension_collect_auto(min_agreement: int) -> None:
+    """구글 뉴스 검색으로 최신 연금복권720+ 당첨번호를 자동 수집한다.
+
+    dhlottery.co.kr 직접 수집은 봇 차단으로 불가능하므로, 추첨 직후 보도되는
+    언론사 기사 제목을 교차검증하여 당첨번호를 추출한다.
+    """
+    from .pension_news_collector import fetch_latest_pension_draw_from_news
+    from .pension_database import init_pension_db, upsert_pension_draw, get_pension_draw
+
+    cfg = load_config()
+    db_path = get_db_path(cfg)
+    init_pension_db(db_path)
+
+    draw = fetch_latest_pension_draw_from_news(min_agreement=min_agreement)
+    if draw is None:
+        click.echo("뉴스 교차검증 실패: 신뢰할 수 있는 당첨번호를 찾지 못했습니다.")
+        click.echo("(회차가 아직 보도되지 않았거나 언론사 표기가 일치하지 않음)")
+        return
+
+    with get_connection(db_path) as conn:
+        existing = get_pension_draw(conn, draw.draw_no)
+        upsert_pension_draw(conn, draw)
+        conn.commit()
+
+    status = "갱신" if existing else "신규 저장"
+    click.echo(f"{status} 완료: 제{draw.draw_no}회 {draw.jo}조 {draw.number} ({draw.draw_date})")
+
+
 @pension.command("recommend")
 @click.option("--send", is_flag=True, default=False, help="Send via Telegram")
 @click.option("--draw-no", type=int, default=None, help="Target draw number (default: latest+1)")
