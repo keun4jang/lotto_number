@@ -472,7 +472,7 @@ def pension_recommend(send: bool, draw_no: Optional[int]) -> None:
     """Generate pension lottery 720+ recommendations."""
     from .pension_database import (
         init_pension_db, get_all_pension_draws, get_latest_pension_draw_no,
-        insert_pension_run, insert_pension_game, get_connection as _gc,
+        insert_pension_run, insert_pension_game,
     )
     from .pension_generator import generate_pension_portfolio
     from .pension_models import PensionRecommendationRun
@@ -489,7 +489,17 @@ def pension_recommend(send: bool, draw_no: Optional[int]) -> None:
         db_latest = get_latest_pension_draw_no(conn)
 
     if not draws:
-        click.echo("데이터 없음. CSV로 먼저 수집하세요: lotto-doctor pension collect <file.csv>")
+        msg = (
+            "데이터 없음. CSV로 먼저 수집하세요: lotto-doctor pension collect <file.csv>"
+        )
+        click.echo(msg)
+        if send:
+            send_message(
+                "⚠️ 연금복권720+ 추천 실패\n\n"
+                "당첨번호 데이터가 아직 없습니다.\n"
+                "dhlottery.co.kr 자동 수집이 차단되어 있어 CSV 수동 임포트가 필요합니다.\n"
+                "(lotto-doctor pension collect <file.csv>)"
+            )
         return
 
     if draw_no is None:
