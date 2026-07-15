@@ -495,6 +495,40 @@ def pension_collect_auto(min_agreement: int) -> None:
     click.echo(f"{status} 완료: 제{draw.draw_no}회 {draw.jo}조 {draw.number} ({draw.draw_date})")
 
 
+@pension.command("backfill")
+@click.option("--count", type=int, default=20, help="백필할 과거 회차 수")
+@click.option("--delay", type=float, default=1.0, help="요청 간 대기 시간(초)")
+def pension_backfill(count: int, delay: float) -> None:
+    """뉴스 검색으로 과거 회차를 회차별 개별 조회하여 통계 신뢰도를 높인다."""
+    from .pension_news_collector import backfill_pension_history
+    from .pension_database import (
+        init_pension_db, get_latest_pension_draw_no, upsert_pension_draw,
+    )
+
+    cfg = load_config()
+    db_path = get_db_path(cfg)
+    init_pension_db(db_path)
+
+    with get_connection(db_path) as conn:
+        latest = get_latest_pension_draw_no(conn)
+
+    if not latest:
+        click.echo("기준이 될 최신 회차가 없습니다. 먼저 pension collect-auto를 실행하세요.")
+        return
+
+    click.echo(f"제{latest}회 기준 과거 {count}개 회차 백필 중...")
+    draws = backfill_pension_history(latest, count=count, delay_sec=delay)
+
+    with get_connection(db_path) as conn:
+        for draw in draws:
+            upsert_pension_draw(conn, draw)
+        conn.commit()
+
+    click.echo(f"백필 완료: {len(draws)}/{count}건 저장")
+    for d in sorted(draws, key=lambda x: x.draw_no):
+        click.echo(f"  제{d.draw_no}회 {d.jo}조 {d.number} ({d.draw_date})")
+
+
 @pension.command("recommend")
 @click.option("--send", is_flag=True, default=False, help="Send via Telegram")
 @click.option("--draw-no", type=int, default=None, help="Target draw number (default: latest+1)")
