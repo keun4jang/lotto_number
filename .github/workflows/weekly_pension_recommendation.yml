@@ -2,7 +2,9 @@ name: Weekly Pension Lottery 720+ Recommendation
 
 on:
   schedule:
-    # 연금복권720+ 추첨일: 목요일 → 전날(수요일)에 09:00, 16:00 KST 하루 2회 발송
+    # 연금복권720+ 추첨일: 목요일 → 2일 전(화,수)부터 매일 09:00, 16:00 KST 2회씩 발송
+    - cron: "0 0 * * 2"  # 화요일 09:00 KST
+    - cron: "0 7 * * 2"  # 화요일 16:00 KST
     - cron: "0 0 * * 3"  # 수요일 09:00 KST
     - cron: "0 7 * * 3"  # 수요일 16:00 KST
   workflow_dispatch:

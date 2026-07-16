@@ -2,7 +2,9 @@ name: Weekly Lotto Recommendation
 
 on:
   schedule:
-    # 로또 추첨일: 토요일 → 전날(금요일)에 09:00, 16:00 KST 하루 2회 발송
+    # 로또 추첨일: 토요일 → 2일 전(목,금)부터 매일 09:00, 16:00 KST 2회씩 발송
+    - cron: "0 0 * * 4"  # 목요일 09:00 KST
+    - cron: "0 7 * * 4"  # 목요일 16:00 KST
     - cron: "0 0 * * 5"  # 금요일 09:00 KST
     - cron: "0 7 * * 5"  # 금요일 16:00 KST
   workflow_dispatch:
