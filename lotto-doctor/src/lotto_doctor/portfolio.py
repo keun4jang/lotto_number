@@ -28,6 +28,7 @@ def build_portfolio(
     number_features = compute_number_features(draws, cfg)
     pair_freq = compute_pair_frequency(draws)
     total_draws = len(draws)
+    prev_draw = draws[-1] if draws else None
 
     # Score each strategy pool and pick best per strategy
     selected_combos: list[tuple[str, list[int]]] = []  # (strategy, numbers)
@@ -37,7 +38,8 @@ def build_portfolio(
         if not candidates:
             continue
         scored = score_candidates(
-            candidates, strategy, number_features, pair_freq, total_draws, cfg
+            candidates, strategy, number_features, pair_freq, total_draws, cfg,
+            prev_draw=prev_draw,
         )
 
         # Greedily pick n_games with diversity constraint against already-selected

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import CombinationScore, NumberFeatures
+from .models import CombinationScore, Draw, NumberFeatures
+from .popularity import number_bias_score as _number_bias_score
 from .popularity import unpopularity_score as _unpopularity_score
 
 
@@ -15,6 +16,7 @@ def compute_combination_score(
     pair_freq: dict[tuple[int, int], int],
     total_draws: int,
     cfg: dict[str, Any],
+    prev_draw: Draw | None = None,
 ) -> CombinationScore:
     """Compute all score components for a 6-number combination under a given strategy."""
     weights: dict[str, float] = cfg["scoring"]["weights"].get(
@@ -48,11 +50,13 @@ def compute_combination_score(
     trend_sc = sum(number_features[n].trend for n in nums) / 6
     trend_sc = (trend_sc + 1.0) / 2.0  # [-1,1] → [0,1]
 
-    # 9. Stability: 꾸준히 나오는 번호
+    # 9. Stability: 꼽꿨히 나오는 번호
     stability_sc = sum(number_features[n].stability for n in nums) / 6
 
     # 10. EV score: unpopularity_score (popularity.py 기반)
-    ev_sc = _unpopularity_score(nums)
+    #     직전 회차 정보가 있으면 '직전 번호 재구매' 편향까지 반영
+    prev_numbers = prev_draw.numbers if prev_draw is not None else None
+    ev_sc = _unpopularity_score(nums, prev_numbers=prev_numbers)
 
     total = (
         weights.get("long_frequency", 0.0) * long_freq
@@ -96,9 +100,9 @@ def _pair_score(
         for j in range(i + 1, len(nums)):
             key = (nums[i], nums[j])
             observed = pair_freq.get(key, 0)
-            # χ² 기여값 (편차가 클수록 낮은 점수)
+            # χ² 기여값 (편차가 클수록 낙은 점수)
             chi2 = (observed - expected) ** 2 / (expected + 1e-9)
-            # 정규화: chi2가 낮을수록(기댓값에 가까울수록) 높은 점수
+            # 정규화: chi2가 낙을수록(기댓값에 가까울수록) 높은 점수
             scores.append(1.0 / (1.0 + chi2 / 10.0))
     return sum(scores) / len(scores) if scores else 0.5
 
@@ -116,16 +120,14 @@ def _distribution_score(nums: list[int]) -> float:
 
 
 def _anti_popularity_score(nums: list[int]) -> float:
-    """구매자 편향(생일 번호 등) 역수 점수 - 덜 인기 있는 조합일수록 높은 점수.
+    """구매자 편향(생일/행운 숫자) 회피 점수 — 덜 인기 있는 번호일수록 높음.
 
-    당첨 시 상금 분할을 줄이기 위해 인기 없는 번호 조합을 선호.
-    이는 로또에서 수학적으로 기댓값(EV)을 향상시킬 수 있는 유일한 방법.
+    당첨 확률은 모든 조합이 동일하다. 이 점수는 당첨 시 공동 당첨자
+    수를 줄이는(상금 분할 회피) EV 관점 지표일 뿐이며, 당첨 보장과
+    무관하다. 번호 단위 편향은 popularity.NUMBER_POPULARITY 를 단일
+    소스로 공유한다 (조합 단위 패턴은 ev_score 가 담당).
     """
-    _POPULARITY: dict[int, float] = {n: (1.5 if n <= 31 else 1.0) for n in range(1, 46)}
-    _POPULARITY.update({7: 2.0, 14: 2.0, 21: 2.0, 28: 2.0, 1: 1.8, 3: 1.7, 6: 1.7, 13: 0.7})
-    avg_popularity = sum(_POPULARITY.get(n, 1.0) for n in nums) / 6
-    # 평균 인기도 역수를 [0,1]로 정규화 (최소 인기도=0.7, 최대=2.0 기준)
-    return max(0.0, min(1.0, (2.0 - avg_popularity) / (2.0 - 0.7)))
+    return 1.0 - _number_bias_score(nums)
 
 
 def _diversity_score(nums: list[int]) -> float:

@@ -11,11 +11,10 @@ from .analyzer import compute_number_features, compute_pair_frequency
 from .filters import passes_all_filters
 from .models import Draw, NumberFeatures
 
-# 구매자 편향 가중치 (생일 편향 반영 - anti_crowding 전략용)
-# 1-31은 생일 선택으로 인해 더 많이 선택됨 → anti_crowding은 이를 회피
-_POPULARITY_BIAS: dict[int, float] = {n: (1.5 if n <= 31 else 1.0) for n in range(1, 46)}
-_POPULARITY_BIAS.update({7: 2.0, 14: 2.0, 21: 2.0, 28: 2.0,  # 7의 배수 인기
-                          1: 1.8, 3: 1.7, 6: 1.7, 13: 0.7})   # 1,3,6 인기 / 13 비인기
+# 구매자 편향 가중치 (anti_crowding / ev_optimized 전략용)
+# popularity.NUMBER_POPULARITY 를 단일 소스로 공유:
+# 생일(1~31, 특히 1~12) 과선택, 행운 숫자(7,3,8) 과선택, 32~45 과소선택 등.
+from .popularity import NUMBER_POPULARITY as _POPULARITY_BIAS
 
 
 def _build_number_pool(
@@ -66,7 +65,11 @@ def _generate_candidates_for_strategy(
     attempts = 0
     max_attempts = count * 20
 
-    min_high = 2 if strategy == "ev_optimized" else 0
+    min_high = (
+        cfg.get("popularity", {}).get("min_high_numbers_ev", 2)
+        if strategy == "ev_optimized"
+        else 0
+    )
     high_threshold = cfg.get("filters", {}).get("high_threshold", 32)
 
     while len(candidates) < count and attempts < max_attempts:

@@ -2,9 +2,9 @@
 
 app:
   name: "lotto-doctor"
-  version: "1.1.0"
+  version: "1.2.0"
   model_name: "balanced-ensemble"
-  model_version: "be-v1.1.0-ev"  # EV/anti-popularity 개선 버전
+  model_version: "be-v1.2.0-ev"  # EV/anti-popularity 편향 모델 개선 버전
 
 data:
   db_path: "data/lotto.db"
@@ -82,11 +82,11 @@ scoring:
       gap_score: 0.08
       pair_score: 0.08
       distribution_score: 0.10
-      anti_crowding: 0.20
+      anti_crowding: 0.18  # 번호 단위 편향 회피 (ev_score 와 소스 공유)
       diversity: 0.10
       trend: 0.02
       stability: 0.02
-      ev_score: 0.28  # EV/unpopularity 최우선
+      ev_score: 0.30  # EV/unpopularity 최우선 (조합 단위 패턴 편향 포함)
 
 features:
   recent_windows: [20, 50, 100]
@@ -109,7 +109,7 @@ filters:
 popularity:
   enabled: true
   min_high_numbers_ev: 2  # ev_optimized: 최소 32 이상 번호 2개 이상 유도
-  target_unpopularity_weight: 0.28
+  target_unpopularity_weight: 0.30  # scoring.weights.ev_optimized.ev_score 와 동기화
 
 backtester:
   min_train_draws: 200
