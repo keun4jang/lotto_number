@@ -17,18 +17,16 @@ from .pension_models import PensionDraw, PensionRecommendationGame
 _LABELS = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 PENSION_STRATEGIES = ["hot", "cold", "balanced"]
-PENSION_NUM_GAMES = 3  # default games per strategy set
+PENSION_NUM_GAMES = 3
 
 
 def _invert_weights(weights: list[float]) -> list[float]:
-    """Invert weights so rare items get higher probability."""
     inv = [1.0 / (w + 1e-6) for w in weights]
     total = sum(inv) or 1.0
     return [v / total for v in inv]
 
 
 def _sample_digit(weights: list[float], rng: random.Random) -> int:
-    """Sample a digit 0-9 given weights."""
     r = rng.random()
     cumulative = 0.0
     for i, w in enumerate(weights):
@@ -41,14 +39,22 @@ def _sample_digit(weights: list[float], rng: random.Random) -> int:
 def _sample_jo(jo_freq: dict[int, int], strategy: str, rng: random.Random, jo_range: int = 5) -> int:
     jos = list(range(1, jo_range + 1))
     counts = [jo_freq.get(j, 0) for j in jos]
-    total = sum(counts) or 1
-    weights = [c / total for c in counts]
+    total = sum(counts)
+    if total > 0:
+        weights = [c / total for c in counts]
+    else:
+        # 데이터 없음 → 균등분포 (전 가중치 0이면 항상 마지막 조가 뽑히는 버그 방지)
+        weights = [1.0 / len(jos)] * len(jos)
 
     if strategy == "cold":
         weights = _invert_weights(weights)
     elif strategy == "balanced":
         uniform = [1.0 / len(jos)] * len(jos)
         weights = [(a + b) / 2 for a, b in zip(weights, uniform)]
+
+    # 방어적 재정규화: 샘플링 가중치는 항상 합 1의 확률분포여야 한다
+    total_w = sum(weights) or 1.0
+    weights = [w / total_w for w in weights]
 
     r = rng.random()
     cumulative = 0.0
@@ -62,8 +68,12 @@ def _sample_jo(jo_freq: dict[int, int], strategy: str, rng: random.Random, jo_ra
 def _generate_number(digit_freq: list[dict[int, int]], strategy: str, rng: random.Random) -> str:
     digits = []
     for pos_freq in digit_freq:
-        total = sum(pos_freq.values()) or 1
-        base_weights = [pos_freq.get(d, 0) / total for d in range(10)]
+        total = sum(pos_freq.values())
+        if total > 0:
+            base_weights = [pos_freq.get(d, 0) / total for d in range(10)]
+        else:
+            # 데이터 없음 → 균등분포 (전 가중치 0이면 항상 9가 뽑히는 버그 방지)
+            base_weights = [0.1] * 10
 
         if strategy == "hot":
             weights = base_weights
@@ -72,8 +82,10 @@ def _generate_number(digit_freq: list[dict[int, int]], strategy: str, rng: rando
         else:  # balanced
             uniform = [0.1] * 10
             weights = [(a + b) / 2 for a, b in zip(base_weights, uniform)]
-            total_w = sum(weights) or 1.0
-            weights = [w / total_w for w in weights]
+
+        # 방어적 재정규화: 샘플링 가중치는 항상 합 1의 확률분포여야 한다
+        total_w = sum(weights) or 1.0
+        weights = [w / total_w for w in weights]
 
         digits.append(str(_sample_digit(weights, rng)))
     return "".join(digits)

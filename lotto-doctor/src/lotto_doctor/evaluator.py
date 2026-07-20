@@ -16,7 +16,6 @@ RANK_LABELS = {
 
 def compute_rank(matched_count: int, has_bonus_match: bool) -> str:
     """Return rank label for given match count and bonus flag."""
-    key = (matched_count, has_bonus_match and matched_count == 5)
     if matched_count == 6:
         return "1st"
     if matched_count == 5 and has_bonus_match:

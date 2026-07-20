@@ -82,22 +82,31 @@ def compute_weight_adjustment(
 
     base_ratios = {s: current_games[s] / total_current for s in current_games}
 
-    # 성과 점수: avg_match + 희귀 이벤트 보너스 (cap 적용)
-    perf_scores: dict[str, float] = {}
-    for s in active_strategies:
-        if s not in valid:
-            perf_scores[s] = sum(base_ratios[ss] for ss in active_strategies if ss in valid) / len(valid) if valid else 1.0
-            continue
-        p = valid[s]
+    # 성과 점수: avg_match + 희귀 이벤트 보너스 (cap 적용) — 유효 전략 먼저 계산
+    valid_scores: dict[str, float] = {}
+    for s, p in valid.items():
         base_score = p["avg_match"]
         rare_bonus = min(p.get("match_4", 0) * 0.1 + p.get("match_5", 0) * 0.5, rare_cap * 0.1)
         n = p["total_games"]
         reliability = n / (n + shrinkage_k)
         # 기본 배분 대비 성과 편차에 reliability 적용
-        perf_scores[s] = base_score + reliability * rare_bonus
+        valid_scores[s] = base_score + reliability * rare_bonus
+
+    mean_valid_score = sum(valid_scores.values()) / len(valid_scores)
+
+    # 데이터 부족한 활성 전략은 중립 점수(유효 전략 평균, 같은 단위)로 채우고,
+    # 비활성(0게임) 전략은 0점 → 배분 0 유지 (KeyError 방지)
+    perf_scores: dict[str, float] = {}
+    for s in current_games:
+        if s in valid_scores:
+            perf_scores[s] = valid_scores[s]
+        elif s in active_strategies:
+            perf_scores[s] = mean_valid_score
+        else:
+            perf_scores[s] = 0.0
 
     total_perf = sum(perf_scores.values())
-    if total_perf == 0:
+    if total_perf <= 0:
         return None
 
     target_ratios = {s: perf_scores[s] / total_perf for s in current_games}
@@ -112,21 +121,27 @@ def compute_weight_adjustment(
         delta = max(-max_adj, min(max_adj, delta))
         adjusted[s] = max(0.0, base + delta)
 
-    # 정규화 후 합계 total_current 맞추기
+    # 정규화 후 합계 total_current 맞추기: largest-remainder(Hamilton) 방식
+    # → 합계가 항상 보존되고, 특정 전략에 반올림 잔여분이 몰리지 않는다.
     total_adj = sum(adjusted.values())
     if total_adj == 0:
         return None
 
-    new_games: dict[str, int] = {}
-    remainder = total_current
-    sorted_s = sorted(adjusted.items(), key=lambda x: x[1], reverse=True)
-    for i, (s, ratio) in enumerate(sorted_s):
-        if i == len(sorted_s) - 1:
-            new_games[s] = max(0, remainder)
-        else:
-            g = max(0, round(ratio / total_adj * total_current))
-            new_games[s] = g
-            remainder -= g
+    quotas = {s: adjusted[s] / total_adj * total_current for s in adjusted}
+    new_games: dict[str, int] = {s: int(quotas[s]) for s in quotas}  # floor
+    shortfall = total_current - sum(new_games.values())
+
+    # 소수부가 큰 순서대로 1게임씩 배분 (동률 시 quota 큰 쪽 우선 → 결정적)
+    # quota가 0인(비활성) 전략에는 잔여분을 주지 않는다.
+    order = sorted(
+        (s for s in quotas if quotas[s] > 0),
+        key=lambda s: (quotas[s] - int(quotas[s]), quotas[s]),
+        reverse=True,
+    )
+    if shortfall < 0 or shortfall > len(order):
+        return None  # 수치 이상 (방어)
+    for s in order[:shortfall]:
+        new_games[s] += 1
 
     # 합계 검증
     if sum(new_games.values()) != total_current:

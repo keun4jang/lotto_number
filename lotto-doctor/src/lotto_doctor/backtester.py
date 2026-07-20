@@ -26,7 +26,7 @@ def _random_games(
     while len(games) < n_games and attempts < 10_000:
         attempts += 1
         combo = sorted(rng.sample(range(1, 46), 6))
-        if passes_all_filters(combo, cfg, prev_draw):
+        if passes_all_filters(combo, prev_draw, cfg):
             games.append(combo)
     return games
 
@@ -43,13 +43,15 @@ def run_backtest(
     min_train: int = cfg["backtester"]["min_train_draws"]
     results: list[BacktestRun] = []
 
+    # Walk-forward 보장: 회차 오름차순 정렬 (train은 항상 test보다 과거 회차만 포함)
+    draws = sorted(draws, key=lambda d: d.draw_no)
+
     for i in range(min_train, len(draws)):
         train_draws = draws[:i]
         test_draw = draws[i]
         seed = test_draw.draw_no
 
         # Build a temporary run_id placeholder (0 for backtest)
-        from .models import RecommendationGame
         try:
             games, _ = build_portfolio(train_draws, cfg, seed, run_id=0)
         except Exception:

@@ -208,3 +208,82 @@ def test_pension_generator_deterministic():
     for a, b in zip(g1, g2):
         assert a.jo == b.jo
         assert a.number == b.number
+
+# ---------------------------------------------------------------------------
+# Regression tests: 소규모/빈 데이터에서의 샘플링 분포 유효성
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("game_number,expected_rank", [
+    ("923456", "3rd"),   # 뒤 5자리
+    ("993456", "4th"),   # 뒤 4자리
+    ("999456", "5th"),   # 뒤 3자리
+    ("999956", "6th"),   # 뒤 2자리
+    ("999996", "7th"),   # 뒤 1자리
+    ("999999", "no_prize"),
+])
+def test_pension_suffix_prize_ranks(game_number, expected_rank):
+    draw = PensionDraw(draw_no=1, draw_date=date(2021, 1, 1), jo=3, number="123456")
+    game = PensionRecommendationGame(
+        run_id=1, game_label="A", strategy="hot", jo=1, number=game_number
+    )
+    results = evaluate_pension_run([game], draw)
+    assert results[0].prize_rank == expected_rank
+
+
+def test_count_matching_suffix_is_end_anchored():
+    # 길이가 어긋난 입력이라도 '뒤자리' 기준으로 비교해야 한다
+    assert _count_matching_suffix("0123456", "123456") == 6
+    assert _count_matching_suffix("12345", "912345") == 5
+
+
+def test_generate_number_empty_data_not_degenerate():
+    """Regression: 빈 빈도 데이터에서 hot 전략이 항상 '999999'를 만들었다."""
+    import random as _random
+    from lotto_doctor.pension_generator import _generate_number
+
+    rng = _random.Random(1)
+    empty_freq = [dict() for _ in range(6)]
+    digits: list[int] = []
+    for _ in range(50):
+        digits.extend(int(c) for c in _generate_number(empty_freq, "hot", rng))
+    assert len(set(digits)) >= 8   # 균등분포라면 300자리에서 거의 확실히 8종 이상
+    assert any(d != 9 for d in digits)
+
+
+def test_sample_jo_empty_data_not_degenerate():
+    """Regression: 빈 데이터에서 hot은 항상 5조, balanced는 5조로 편향됐었다."""
+    import random as _random
+    from collections import Counter
+    from lotto_doctor.pension_generator import _sample_jo
+
+    for strategy in ["hot", "cold", "balanced"]:
+        rng = _random.Random(7)
+        samples = [_sample_jo({}, strategy, rng) for _ in range(1000)]
+        counts = Counter(samples)
+        assert set(counts) == {1, 2, 3, 4, 5}, f"{strategy}: 일부 조가 전혀 안 나옴"
+        assert max(counts.values()) / 1000 < 0.35, f"{strategy}: 특정 조 편향"
+
+
+def test_pension_generator_empty_draws_no_crash():
+    from lotto_doctor.pension_generator import generate_pension_portfolio
+
+    cfg = {"pension": {"jo_range": 5, "num_games": 5, "recent_window": 50}}
+    games = generate_pension_portfolio([], cfg, seed=1, run_id=1)
+    assert len(games) == 5
+    for g in games:
+        assert 1 <= g.jo <= 5
+        assert len(g.number) == 6
+        assert g.number.isdigit()
+
+
+def test_digit_weights_always_valid_distribution():
+    from lotto_doctor.pension_analyzer import digit_weights
+
+    w_empty = digit_weights({})
+    assert abs(sum(w_empty) - 1.0) < 1e-9
+    assert all(x >= 0 for x in w_empty)
+
+    w = digit_weights({0: 3, 5: 7})
+    assert abs(sum(w) - 1.0) < 1e-9
+    assert all(x >= 0 for x in w)

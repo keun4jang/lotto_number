@@ -31,9 +31,11 @@ from .models import RecommendationRun
 def _get_code_commit() -> Optional[str]:
     import subprocess
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
-        ).stdout.strip() or None
+        res = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=True,
+        )
+        return res.stdout.strip() or None
     except Exception:
         return None
 
@@ -271,6 +273,10 @@ def check_result(send: bool, draw_no: Optional[int]) -> None:
             return
 
         results = evaluate_run(games, draw)
+        # 재실행 시 중복 삽입으로 누적/반성 통계가 부풀려지는 것을 방지
+        conn.execute(
+            "DELETE FROM evaluation_results WHERE run_id = ?", (run_info["id"],)
+        )
         for result in results:
             insert_evaluation_result(conn, result)
         conn.commit()

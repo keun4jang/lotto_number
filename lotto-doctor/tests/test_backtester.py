@@ -142,3 +142,42 @@ def test_backtest_match_counts_bounded():
     for r in results:
         total = r.matched_3 + r.matched_4 + r.matched_5 + r.matched_5b + r.matched_6
         assert total <= 10  # at most 10 games
+
+
+def _result_tuple(r):
+    return (r.matched_3, r.matched_4, r.matched_5, r.matched_5b, r.matched_6)
+
+
+def test_backtest_no_future_leakage():
+    """draws[i]에 대한 결과는 미래 회차(draws[i+1:])의 존재 여부와 무관해야 한다."""
+    draws = _make_draws(15)
+    full = {r.draw_no: _result_tuple(r) for r in run_backtest(draws, MINIMAL_CFG)}
+    partial = {r.draw_no: _result_tuple(r) for r in run_backtest(draws[:11], MINIMAL_CFG)}
+
+    # partial은 draw_no 11 하나만 평가 가능 (min_train=10)
+    assert set(partial) == {dn for dn in full if dn <= 11}
+    for dn, v in partial.items():
+        assert full[dn] == v, f"draw {dn}: 미래 데이터 유무에 따라 결과가 달라짐 (leakage)"
+
+
+def test_backtest_input_order_does_not_matter():
+    """입력 순서가 뒤섞여도 walk-forward는 회차 순으로 정렬되어 동일해야 한다."""
+    draws = _make_draws(15)
+    r1 = [(r.draw_no, _result_tuple(r)) for r in run_backtest(draws, MINIMAL_CFG)]
+    r2 = [(r.draw_no, _result_tuple(r)) for r in run_backtest(list(reversed(draws)), MINIMAL_CFG)]
+    assert r1 == r2
+
+
+def test_random_games_baseline_valid():
+    """Regression: _random_games가 passes_all_filters 인자 순서를 바꿔 호출해 크래시했었다."""
+    from lotto_doctor.backtester import _random_games
+    from lotto_doctor.filters import passes_all_filters
+
+    draws = _make_draws(12)
+    games = _random_games(draws, MINIMAL_CFG, seed=123, n_games=5)
+    assert len(games) == 5
+    for g in games:
+        assert len(g) == 6
+        assert len(set(g)) == 6
+        assert all(1 <= n <= 45 for n in g)
+        assert passes_all_filters(g, draws[-1], MINIMAL_CFG)

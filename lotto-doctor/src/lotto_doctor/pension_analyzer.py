@@ -44,6 +44,11 @@ def get_summary_stats(draws: list[PensionDraw]) -> dict[str, Any]:
 
 
 def digit_weights(freq: dict[int, int]) -> list[float]:
-    """Convert digit frequency dict to probability weights for digits 0-9."""
-    total = sum(freq.values()) or 1
+    """Convert digit frequency dict to probability weights for digits 0-9.
+
+    데이터가 없으면 균등분포를 반환한다 (합 0인 '분포' 방지).
+    """
+    total = sum(freq.values())
+    if total <= 0:
+        return [0.1] * 10
     return [freq.get(d, 0) / total for d in range(10)]

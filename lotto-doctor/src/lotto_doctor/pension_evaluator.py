@@ -6,12 +6,16 @@ from .pension_models import PensionDraw, PensionEvaluationResult, PensionRecomme
 
 
 def _count_matching_suffix(recommended: str, actual: str) -> int:
-    """Count how many trailing digits match between two 6-digit strings."""
-    rec = recommended.zfill(6)
-    act = actual.zfill(6)
+    """Count how many trailing digits match between two 6-digit strings.
+
+    끝자리(뒤)부터 앞으로 비교하며 처음 불일치에서 멈춘다.
+    문자열 끝 기준으로 비교하므로 길이가 어긋난 입력에도 뒤자리 의미가 유지된다.
+    """
+    rec = recommended.strip().zfill(6)
+    act = actual.strip().zfill(6)
     count = 0
-    for i in range(5, -1, -1):
-        if rec[i] == act[i]:
+    for i in range(1, 7):
+        if rec[-i] == act[-i]:
             count += 1
         else:
             break
