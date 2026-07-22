@@ -159,6 +159,7 @@ def generate_reflection_text(
     new_strategy_games: dict[str, float] | None,
     old_strategy_games: dict[str, int] | None = None,
     new_model_version: str | None = None,
+    ev_section: str | None = None,
 ) -> str:
     """일요일 반성 텔레그램 메시지 생성."""
     lines = [
@@ -205,6 +206,9 @@ def generate_reflection_text(
     else:
         lines.append("데이터 축적 중 (조정 보류)")
         lines.append("  → 전략별 최소 30게임 이상 평가 데이터 필요")
+
+    if ev_section:
+        lines.append(ev_section)
 
     lines.append("\n━━━━━━━━━━━━━━━━━━━━")
     lines.append("⚠️ 모든 6개 번호 조합의 1등 확률은 동일합니다.")

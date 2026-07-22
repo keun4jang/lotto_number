@@ -372,6 +372,8 @@ def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
     else:
         click.echo("[반성] 데이터 부족으로 조정 보류")
 
+    ev_section = _compute_ev_section(db_path, draw, games)
+
     reflection_text = generate_reflection_text(
         draw_no=draw.draw_no,
         draw_numbers=draw.numbers,
@@ -381,6 +383,7 @@ def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
         new_strategy_games=new_strategy_games,
         old_strategy_games=old_strategy_games,
         new_model_version=new_ver,
+        ev_section=ev_section,
     )
 
     save_reflection_report(
@@ -394,6 +397,47 @@ def _run_reflection(db_path, draw, games, results, cfg, send: bool) -> None:
     if send:
         send_message(reflection_text)
         click.echo("반성 리포트 텔레그램 발송 완료.")
+
+
+def _compute_ev_section(db_path, draw, games) -> str | None:
+    """EV 계측: 계산 + ev_metrics 저장 + 반성 리포트 섹션 텍스트.
+
+    실패해도 주간 반성 작업을 깨지 않도록 항상 방어적으로 None 반환.
+    (상금 분할 노출 계측일 뿐 당첨 확률과 무관.)
+    """
+    try:
+        from .database import get_all_draws, get_draw
+        from .ev_monitor import (
+            check_calibration_drift,
+            ev_track_record,
+            evaluate_recommendation_ev,
+            format_ev_section,
+            measure_draw_popularity,
+            upsert_ev_metric,
+        )
+
+        with get_connection(db_path) as conn:
+            prev = get_draw(conn, draw.draw_no - 1)
+            prev_nums = list(prev.numbers) if prev else None
+            ev = evaluate_recommendation_ev(
+                games, winning_numbers=draw.numbers, prev_numbers=prev_nums
+            )
+            winner_ratio = measure_draw_popularity(draw)
+            upsert_ev_metric(
+                conn,
+                draw_no=draw.draw_no,
+                portfolio_mean_score=ev["portfolio_mean_score"],
+                portfolio_percentile=ev["portfolio_percentile"],
+                winning_combo_score=ev["winning_combo_score"],
+                winner_ratio=winner_ratio,
+            )
+            conn.commit()
+            history = ev_track_record(conn)
+            drift = check_calibration_drift(get_all_draws(conn))
+        return format_ev_section(ev, winner_ratio, history, drift)
+    except Exception as e:  # noqa: BLE001 — 주간 잡 보호
+        click.echo(f"[EV 계측] 계산 생략: {e}")
+        return None
 
 
 @main.command()
