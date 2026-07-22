@@ -37,8 +37,12 @@ def save_recommendation_markdown(
     candidate_numbers: list[tuple[int, float]],
     draw_no: int,
     cfg: dict[str, Any],
+    coverage_line: str | None = None,
 ) -> Path:
-    """Save recommendation report as Markdown."""
+    """Save recommendation report as Markdown.
+
+    coverage_line: 커버리지 리포트 (분산 구조 지표 — 확률/EV 향상 아님).
+    """
     out_dir = _reports_dir(cfg)
     path = out_dir / f"recommendation_{draw_no}.md"
     lines = [
@@ -65,6 +69,9 @@ def save_recommendation_markdown(
     for g in games:
         nums_str = " - ".join(f"{n:02d}" for n in g.numbers)
         lines.append(f"| {g.game_label} | {g.strategy} | {nums_str} |")
+
+    if coverage_line:
+        lines.extend(["", "## 커버리지", "", coverage_line])
 
     path.write_text("\n".join(lines), encoding="utf-8")
     return path

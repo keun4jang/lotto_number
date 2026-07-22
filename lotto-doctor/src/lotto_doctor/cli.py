@@ -135,9 +135,17 @@ def analyze() -> None:
 @click.option("--send", is_flag=True, default=False, help="Send via Telegram")
 @click.option("--draw-no", type=int, default=None, help="Target draw number (default: latest+1)")
 @click.option("--force", is_flag=True, default=False, help="캐시 무시하고 새 추천 생성")
-def recommend(send: bool, draw_no: Optional[int], force: bool) -> None:
+@click.option(
+    "--mode",
+    type=click.Choice(["portfolio", "wheel"], case_sensitive=False),
+    default="portfolio",
+    show_default=True,
+    help="portfolio: 기본 전략별 추천 / wheel: TOP-12 후보 번호 축약 휠 (분산 구조만 조정, 확률/EV 불변)",
+)
+def recommend(send: bool, draw_no: Optional[int], force: bool, mode: str) -> None:
     """Generate recommendations and optionally send via Telegram."""
-    from .portfolio import build_portfolio
+    from .coverage import format_coverage_line, portfolio_coverage_metrics
+    from .portfolio import build_portfolio, build_wheel_portfolio
     from .reporter import save_recommendation_csv, save_recommendation_markdown
     from .telegram_bot import build_recommendation_message, send_message
     from .analyzer import get_summary_stats
@@ -157,9 +165,13 @@ def recommend(send: bool, draw_no: Optional[int], force: bool) -> None:
     if draw_no is None:
         draw_no = (db_latest or 0) + 1
 
+    mode = mode.lower()
     seed = draw_no
     model_name = cfg["app"]["model_name"]
     model_version = cfg["app"]["model_version"]
+    if mode == "wheel":
+        # 캐시/기본 모드와 충돌 방지: wheel run 은 별도 model_version 으로 저장
+        model_version = f"{model_version}+wheel"
     cfg_hash = compute_config_hash(cfg)
     num_games = cfg["generator"]["num_games"]
     strategy_games: dict[str, int] = cfg["generator"]["strategy_games"]
@@ -197,7 +209,10 @@ def recommend(send: bool, draw_no: Optional[int], force: bool) -> None:
             run_id = insert_recommendation_run(conn, run)
             conn.commit()
 
-        games, candidate_numbers = build_portfolio(draws, cfg, seed, run_id)
+        if mode == "wheel":
+            games, candidate_numbers, _ = build_wheel_portfolio(draws, cfg, seed, run_id)
+        else:
+            games, candidate_numbers = build_portfolio(draws, cfg, seed, run_id)
 
         with get_connection(db_path) as conn:
             for game in games:
@@ -212,15 +227,29 @@ def recommend(send: bool, draw_no: Optional[int], force: bool) -> None:
         "모델": f"{model_name} {model_version}",
     }
 
+    # 커버리지 리포트 (분산 구조 지표 — 티켓당 확률/EV 향상 아님, 당첨 보장 없음)
+    game_number_lists = [g.numbers for g in games]
+    cov_metrics = portfolio_coverage_metrics(game_number_lists)
+    wheel_coverage = None
+    if mode == "wheel":
+        from .coverage import wheel_3subset_coverage
+        from .generator import select_top_numbers
+
+        pool_size = cfg.get("portfolio", {}).get("wheel_pool_size", 12)
+        pool = [n for n, _ in select_top_numbers(draws, cfg, seed, top_k=pool_size)]
+        wheel_coverage = wheel_3subset_coverage(game_number_lists, pool)
+    coverage_line = format_coverage_line(cov_metrics, wheel_coverage)
+
     top_nums = [(c.number, c.score) for c in candidate_numbers]
     save_recommendation_csv(games, draw_no, cfg)
-    save_recommendation_markdown(games, top_nums, draw_no, cfg)
+    save_recommendation_markdown(games, top_nums, draw_no, cfg, coverage_line=coverage_line)
 
     click.echo(f"\n후보번호 TOP 10: {', '.join(str(c.number) for c in candidate_numbers)}")
     click.echo(f"\n추천 {len(games)}게임:")
     for g in games:
         nums_str = " - ".join(f"{n:02d}" for n in g.numbers)
         click.echo(f"  {g.game_label}: [{g.strategy}] {nums_str}")
+    click.echo(f"\n{coverage_line}")
 
     if send:
         from datetime import datetime, timedelta

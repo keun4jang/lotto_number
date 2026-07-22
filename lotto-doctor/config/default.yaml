@@ -106,6 +106,13 @@ filters:
   max_prev_draw_overlap: 3
   max_game_overlap: 2
 
+portfolio:
+  # 커버리지 인식 선택: 점수 상위 후보 중 기존 게임과의 겹침이 적은 조합 선호.
+  # 분산 구조(하위 등수 결과 분포)만 조정 — 티켓당 확률/EV 불변, 당첨 보장 없음.
+  coverage_weight: 0.05     # 겹침 페널티 가중치 (0 = 기존 동작과 유사)
+  candidate_pool: 200       # 전략별 커버리지 비교 대상 상위 후보 수
+  wheel_pool_size: 12       # --mode wheel: TOP-N 후보 번호 풀 크기
+
 popularity:
   enabled: true
   min_high_numbers_ev: 2  # ev_optimized: 최소 32 이상 번호 2개 이상 유도
