@@ -4,7 +4,7 @@ app:
   name: "lotto-doctor"
   version: "1.2.0"
   model_name: "balanced-ensemble"
-  model_version: "be-v1.2.0-ev"  # EV/anti-popularity 편향 모델 개선 버전
+  model_version: "be-v1.3.0-ev"  # 한국 실측(1등 당첨자 수) 기반 인기도 모델 보정
 
 data:
   db_path: "data/lotto.db"
